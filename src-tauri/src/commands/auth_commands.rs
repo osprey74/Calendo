@@ -97,7 +97,10 @@ pub async fn auth_status(source_id: String) -> AppResult<AuthStatus> {
             Some(t) => Ok(AuthStatus {
                 source_id: id,
                 connected: true,
-                expires_at: Some(t.expires_at),
+                // expires_at is 0 when only the refresh token is on disk and
+                // no in-memory access token has been minted yet (typical right
+                // after app launch). Surface that as None to the UI.
+                expires_at: Some(t.expires_at).filter(|x| *x > 0),
             }),
             None => Ok(AuthStatus {
                 source_id: id,

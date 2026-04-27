@@ -2,6 +2,8 @@ use crate::error::{AppError, AppResult};
 use crate::models::CalendarSourceId;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 const SERVICE: &str = "calendo";
 
@@ -10,11 +12,29 @@ fn entry(source_id: CalendarSourceId, key: &str) -> AppResult<keyring::Entry> {
     keyring::Entry::new(SERVICE, &user).map_err(AppError::from)
 }
 
+/// In-memory cache for access tokens. Microsoft Graph access tokens are JWTs
+/// that can exceed 2560 UTF-16 chars on their own — beyond the Windows
+/// Credential Manager limit — so we keep them in memory only and persist only
+/// the (much smaller) refresh token to the OS keychain. Access tokens are
+/// re-issued via the refresh token on first use after each app launch.
+#[derive(Clone)]
+struct AccessCacheEntry {
+    access_token: String,
+    expires_at: i64,
+}
+
+fn access_cache() -> &'static Mutex<HashMap<CalendarSourceId, AccessCacheEntry>> {
+    static CACHE: OnceLock<Mutex<HashMap<CalendarSourceId, AccessCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredTokens {
     pub access_token: String,
     pub refresh_token: Option<String>,
     /// Unix timestamp (seconds since epoch) at which `access_token` expires.
+    /// Will be 0 if loaded from a fresh process where only the refresh token
+    /// is on disk — `is_expired()` treats this as "needs refresh".
     pub expires_at: i64,
 }
 
@@ -29,58 +49,55 @@ impl StoredTokens {
     }
 }
 
-/// Inner struct for the access-token slot. Splitting access_token and refresh_token
-/// across two keyring entries keeps each one within the Windows Credential Manager
-/// 2560-UTF-16-char (5120-byte) password limit — Microsoft Graph access tokens alone
-/// can be 2-3 KB and refresh tokens add another 1-2 KB.
-#[derive(Debug, Serialize, Deserialize)]
-struct AccessSlot {
-    access_token: String,
-    expires_at: i64,
-}
-
 pub fn save_tokens(source_id: CalendarSourceId, tokens: &StoredTokens) -> AppResult<()> {
-    let access = AccessSlot {
-        access_token: tokens.access_token.clone(),
-        expires_at: tokens.expires_at,
-    };
-    entry(source_id, "access")?.set_password(&serde_json::to_string(&access)?)?;
-
+    // Persist refresh_token only — access tokens go to in-memory cache.
     let refresh_entry = entry(source_id, "refresh")?;
     if let Some(rt) = tokens.refresh_token.as_ref() {
         refresh_entry.set_password(rt)?;
-    } else {
-        match refresh_entry.delete_credential() {
-            Ok(_) | Err(keyring::Error::NoEntry) => {}
-            Err(e) => return Err(e.into()),
-        }
+    }
+
+    if !tokens.access_token.is_empty() {
+        access_cache().lock().unwrap().insert(
+            source_id,
+            AccessCacheEntry {
+                access_token: tokens.access_token.clone(),
+                expires_at: tokens.expires_at,
+            },
+        );
     }
     Ok(())
 }
 
 pub fn load_tokens(source_id: CalendarSourceId) -> AppResult<Option<StoredTokens>> {
-    let access_json = match entry(source_id, "access")?.get_password() {
-        Ok(s) => s,
-        Err(keyring::Error::NoEntry) => return Ok(None),
-        Err(e) => return Err(AppError::from(e)),
-    };
-    let access: AccessSlot = serde_json::from_str(&access_json)?;
-
     let refresh_token = match entry(source_id, "refresh")?.get_password() {
         Ok(s) => Some(s),
         Err(keyring::Error::NoEntry) => None,
         Err(e) => return Err(AppError::from(e)),
     };
 
+    if refresh_token.is_none() {
+        return Ok(None);
+    }
+
+    let cached = access_cache().lock().unwrap().get(&source_id).cloned();
+    let (access_token, expires_at) = match cached {
+        Some(c) => (c.access_token, c.expires_at),
+        // No in-memory cache yet (likely first call after app launch). Caller
+        // is expected to invoke ensure_fresh() which will refresh on demand.
+        None => (String::new(), 0),
+    };
+
     Ok(Some(StoredTokens {
-        access_token: access.access_token,
+        access_token,
         refresh_token,
-        expires_at: access.expires_at,
+        expires_at,
     }))
 }
 
 pub fn delete_tokens(source_id: CalendarSourceId) -> AppResult<()> {
-    for slot in ["access", "refresh", "tokens"] {
+    access_cache().lock().unwrap().remove(&source_id);
+    // Clean up legacy entries from earlier Phase 1 iterations as well.
+    for slot in ["refresh", "access", "tokens"] {
         match entry(source_id, slot)?.delete_credential() {
             Ok(_) | Err(keyring::Error::NoEntry) => {}
             Err(e) => return Err(AppError::from(e)),
