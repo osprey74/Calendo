@@ -44,6 +44,31 @@ body {
   color: #555;
 }
 
+.debug-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 0.78rem;
+  background: #f1f4f8;
+  border: 1px solid #d8dde4;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 16px;
+  color: #555;
+}
+
+.debug-bar strong {
+  color: #333;
+}
+
+.debug-bar code {
+  background: #fff;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #d8dde4;
+  font-family: "JetBrains Mono", Menlo, monospace;
+}
+
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
@@ -227,6 +252,22 @@ button.secondary:hover:not(:disabled) {
   :root {
     color: #e6e6e6;
     background-color: #1a1b1d;
+  }
+
+  .debug-bar {
+    background: #25262a;
+    border-color: #3a3c41;
+    color: #aaa;
+  }
+
+  .debug-bar strong {
+    color: #ddd;
+  }
+
+  .debug-bar code {
+    background: #1f2024;
+    border-color: #3a3c41;
+    color: #ddd;
   }
 
   .card {

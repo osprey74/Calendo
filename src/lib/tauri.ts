@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AuthStatus, CalendarMeta, CalendarSourceId } from "../types";
+import type { AuthStatus, CalendarMeta, CalendarSourceId, ClientDebugInfo } from "../types";
 
 export const authStart = (sourceId: CalendarSourceId) =>
   invoke<AuthStatus>("auth_start", { sourceId });
@@ -18,3 +18,5 @@ export const authIcloudSave = (appleId: string, appPassword: string) =>
 
 export const calendarsFetch = (sourceId: CalendarSourceId) =>
   invoke<CalendarMeta[]>("calendars_fetch", { sourceId });
+
+export const authDebugClients = () => invoke<ClientDebugInfo>("auth_debug_clients");

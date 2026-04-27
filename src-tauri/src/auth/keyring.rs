@@ -29,28 +29,64 @@ impl StoredTokens {
     }
 }
 
+/// Inner struct for the access-token slot. Splitting access_token and refresh_token
+/// across two keyring entries keeps each one within the Windows Credential Manager
+/// 2560-UTF-16-char (5120-byte) password limit — Microsoft Graph access tokens alone
+/// can be 2-3 KB and refresh tokens add another 1-2 KB.
+#[derive(Debug, Serialize, Deserialize)]
+struct AccessSlot {
+    access_token: String,
+    expires_at: i64,
+}
+
 pub fn save_tokens(source_id: CalendarSourceId, tokens: &StoredTokens) -> AppResult<()> {
-    let json = serde_json::to_string(tokens)?;
-    entry(source_id, "tokens")?.set_password(&json)?;
+    let access = AccessSlot {
+        access_token: tokens.access_token.clone(),
+        expires_at: tokens.expires_at,
+    };
+    entry(source_id, "access")?.set_password(&serde_json::to_string(&access)?)?;
+
+    let refresh_entry = entry(source_id, "refresh")?;
+    if let Some(rt) = tokens.refresh_token.as_ref() {
+        refresh_entry.set_password(rt)?;
+    } else {
+        match refresh_entry.delete_credential() {
+            Ok(_) | Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
     Ok(())
 }
 
 pub fn load_tokens(source_id: CalendarSourceId) -> AppResult<Option<StoredTokens>> {
-    match entry(source_id, "tokens")?.get_password() {
-        Ok(json) => {
-            let tokens = serde_json::from_str::<StoredTokens>(&json)?;
-            Ok(Some(tokens))
-        }
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(AppError::from(e)),
-    }
+    let access_json = match entry(source_id, "access")?.get_password() {
+        Ok(s) => s,
+        Err(keyring::Error::NoEntry) => return Ok(None),
+        Err(e) => return Err(AppError::from(e)),
+    };
+    let access: AccessSlot = serde_json::from_str(&access_json)?;
+
+    let refresh_token = match entry(source_id, "refresh")?.get_password() {
+        Ok(s) => Some(s),
+        Err(keyring::Error::NoEntry) => None,
+        Err(e) => return Err(AppError::from(e)),
+    };
+
+    Ok(Some(StoredTokens {
+        access_token: access.access_token,
+        refresh_token,
+        expires_at: access.expires_at,
+    }))
 }
 
 pub fn delete_tokens(source_id: CalendarSourceId) -> AppResult<()> {
-    match entry(source_id, "tokens")?.delete_credential() {
-        Ok(_) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(AppError::from(e)),
+    for slot in ["access", "refresh", "tokens"] {
+        match entry(source_id, slot)?.delete_credential() {
+            Ok(_) | Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(AppError::from(e)),
+        }
     }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

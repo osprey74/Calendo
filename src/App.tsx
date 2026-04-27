@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { DEFAULT_SOURCES } from "./types";
-import type { AuthStatus, CalendarMeta, CalendarSourceId, SourceDescriptor } from "./types";
+import type { AuthStatus, CalendarMeta, CalendarSourceId, ClientDebugInfo, SourceDescriptor } from "./types";
 import {
+  authDebugClients,
   authIcloudSave,
   authRevoke,
   authStart,
@@ -32,6 +33,7 @@ function App() {
   });
   const [appleId, setAppleId] = useState("");
   const [appPassword, setAppPassword] = useState("");
+  const [debug, setDebug] = useState<ClientDebugInfo | null>(null);
 
   useEffect(() => {
     DEFAULT_SOURCES.forEach(async (s) => {
@@ -42,6 +44,7 @@ function App() {
         setErrors((prev) => ({ ...prev, [s.id]: String(e) }));
       }
     });
+    authDebugClients().then(setDebug).catch(() => {});
   }, []);
 
   const setError = (id: CalendarSourceId, msg: string | null) =>
@@ -105,6 +108,22 @@ function App() {
         <h1>Calendo</h1>
         <span className="phase-badge">Phase 1 — Connection Test</span>
       </header>
+
+      {debug && (
+        <div className="debug-bar">
+          <strong>注入された OAuth クライアント:</strong>
+          <span>
+            MS_CLIENT_ID = <code>{debug.msClientId ?? "(未設定)"}</code>
+          </span>
+          <span>
+            GOOGLE_CLIENT_ID = <code>{debug.googleClientId ?? "(未設定)"}</code>
+          </span>
+          <span>
+            GOOGLE_CLIENT_SECRET ={" "}
+            <code>{debug.googleClientSecretConfigured ? "(設定済み)" : "(未設定)"}</code>
+          </span>
+        </div>
+      )}
 
       <div className="cards">
         {DEFAULT_SOURCES.map((s) => {

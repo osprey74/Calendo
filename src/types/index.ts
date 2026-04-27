@@ -20,6 +20,12 @@ export type CalendarMeta = {
   enabled: boolean;
 };
 
+export type ClientDebugInfo = {
+  msClientId: string | null;
+  googleClientId: string | null;
+  googleClientSecretConfigured: boolean;
+};
+
 export type SourceDescriptor = {
   id: CalendarSourceId;
   label: string;

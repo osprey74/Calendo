@@ -1,9 +1,44 @@
 use crate::auth::{icloud, keyring, oauth};
 use crate::error::{AppError, AppResult};
 use crate::models::{AuthStatus, CalendarSourceId};
+use serde::Serialize;
 
 fn parse_source(s: &str) -> AppResult<CalendarSourceId> {
     CalendarSourceId::from_str(s).ok_or_else(|| AppError::UnknownSource(s.to_string()))
+}
+
+fn mask(value: Option<&str>) -> Option<String> {
+    value.filter(|s| !s.is_empty()).map(|s| {
+        let len = s.chars().count();
+        if len <= 12 {
+            format!("(len={len})")
+        } else {
+            let head: String = s.chars().take(6).collect();
+            let tail: String = s.chars().skip(len - 4).collect();
+            format!("{head}…{tail} (len={len})")
+        }
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub struct ClientDebugInfo {
+    #[serde(rename = "msClientId")]
+    ms_client_id: Option<String>,
+    #[serde(rename = "googleClientId")]
+    google_client_id: Option<String>,
+    #[serde(rename = "googleClientSecretConfigured")]
+    google_client_secret_configured: bool,
+}
+
+#[tauri::command]
+pub fn auth_debug_clients() -> ClientDebugInfo {
+    ClientDebugInfo {
+        ms_client_id: mask(option_env!("MS_CLIENT_ID")),
+        google_client_id: mask(option_env!("GOOGLE_CLIENT_ID")),
+        google_client_secret_configured: option_env!("GOOGLE_CLIENT_SECRET")
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+    }
 }
 
 #[tauri::command]

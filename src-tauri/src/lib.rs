@@ -5,7 +5,7 @@ mod error;
 mod models;
 
 use commands::auth_commands::{
-    auth_icloud_save, auth_refresh, auth_revoke, auth_start, auth_status,
+    auth_debug_clients, auth_icloud_save, auth_refresh, auth_revoke, auth_start, auth_status,
 };
 use commands::calendar_commands::{
     calendars_fetch, event_create, event_delete, event_update, events_fetch,
@@ -22,6 +22,7 @@ pub fn run() {
             auth_revoke,
             auth_status,
             auth_icloud_save,
+            auth_debug_clients,
             calendars_fetch,
             events_fetch,
             event_create,
