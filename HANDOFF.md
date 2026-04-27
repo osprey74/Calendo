@@ -1,8 +1,8 @@
 # HANDOFF.md — Calendo
 
 **最終更新**: 2026-04-27
-**バージョン**: v0.0.0（プロジェクト未初期化）
-**フェーズ**: Phase 0（事前準備）着手前
+**バージョン**: v0.1.0（開発中）
+**フェーズ**: Phase 1（認証・接続確立）— Rust 認証層・最小フロント実装完了、実機動作確認待ち
 
 ---
 
@@ -100,17 +100,28 @@ gh secret set GOOGLE_CLIENT_SECRET --repo osprey74/Calendo
 
 ### Phase 1：認証・接続確立（MVP 前提）
 
-- [ ] Tauri v2 プロジェクト初期化（`bun create tauri-app` または `npm create tauri-app`）
-- [ ] React + TypeScript + Vite テンプレート選択
-- [ ] `tauri-plugin-oauth` 導入（コールバック受信用ローカルサーバ）
-- [ ] `tauri-plugin-store` 導入（設定永続化）
-- [ ] `keyring` crate 追加・OS Keychain 読み書きラッパー実装（[src-tauri/src/auth/keyring.rs](src-tauri/src/auth/keyring.rs)）
-- [ ] PKCE コード生成・トークン交換・リフレッシュ共通実装（[src-tauri/src/auth/oauth.rs](src-tauri/src/auth/oauth.rs)）
-- [ ] Microsoft Graph OAuth フロー実装（`auth_start("ms365_work1" | "ms365_work2")`）
-- [ ] Google Calendar OAuth フロー実装（`auth_start("google_gws")`）
-- [ ] iCloud アプリ専用パスワード保存コマンド（`auth_icloud_save`）
-- [ ] iCloud CalDAV 接続確認（`PROPFIND /` でプリンシパル URL 取得）
-- [ ] 各ソースの動作確認用 CLI 的フロント（最小限）
+- [x] Tauri v2 プロジェクト初期化（`npm create tauri-app` / React + TypeScript + Vite テンプレート）
+- [x] `tauri-plugin-oauth` 導入（コールバック受信用ローカルサーバ）
+- [x] `tauri-plugin-store` 導入（設定永続化）
+- [x] `keyring` crate 追加・OS Keychain 読み書きラッパー実装（[src-tauri/src/auth/keyring.rs](src-tauri/src/auth/keyring.rs)）
+- [x] PKCE コード生成・トークン交換・リフレッシュ共通実装（[src-tauri/src/auth/oauth.rs](src-tauri/src/auth/oauth.rs)）
+- [x] Microsoft Graph OAuth フロー実装（`auth_start("ms365_work1" | "ms365_work2")`）
+- [x] Google Calendar OAuth フロー実装（`auth_start("google_gws")`）
+- [x] iCloud アプリ専用パスワード保存コマンド（`auth_icloud_save`）
+- [x] iCloud CalDAV 接続確認（`PROPFIND /` で principal 到達確認、[src-tauri/src/auth/icloud.rs](src-tauri/src/auth/icloud.rs)）
+- [x] 各ソースの動作確認用フロント実装（[src/App.tsx](src/App.tsx)：4 ソース連結カード + iCloud 入力フォーム）
+- [x] `cargo check` / `npm run build` 通過
+- [x] OAuth クライアント ID 注入用 [src-tauri/build.rs](src-tauri/build.rs)（`.env` 読み取り → `cargo:rustc-env=`）
+- [ ] **実機動作確認**: ローカル `.env` 作成 → `npm run tauri dev` → 4 ソースの接続フロー確認
+
+#### Phase 1 実装メモ
+
+- OAuth Client ID／Secret は **コンパイル時 env 注入**（`option_env!`）。dev 時は `g:/dev/calendo/.env` に記入、CI は GitHub Secrets。
+- `tauri-plugin-oauth` v2 の `start(handler)` は引数 1 つ（FnMut(String)）。redirect_uri は `http://localhost:<エフェメラルポート>` で生成。
+- Azure / Google の OAuth 設定で **リダイレクト URI に `http://localhost`（パブリッククライアント）を登録**することを忘れないこと（Azure はパブリッククライアントフローを有効化、Google はデスクトップアプリ種別なら自動）。
+- keyring エントリ命名: service=`calendo`, user=`<source_id>.tokens` または `icloud.credentials`。
+- iCloud 認証は `auth_icloud_save` で **保存前に PROPFIND で疎通確認**（401 なら拒否）。
+- CalDAV のサブカレンダー列挙は `caldav.rs` で空リストを返す **スタブ状態**（principal 到達確認のみ）。完全な enumerate は Phase 2 で実装。
 
 ### Phase 2：イベント取得・表示
 
