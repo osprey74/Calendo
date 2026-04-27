@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum CalendarSourceId {
     Ms365Work1,
-    Ms365Work2,
     GoogleGws,
     Icloud,
 }
@@ -13,7 +12,6 @@ impl CalendarSourceId {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "ms365_work1" => Some(Self::Ms365Work1),
-            "ms365_work2" => Some(Self::Ms365Work2),
             "google_gws" => Some(Self::GoogleGws),
             "icloud" => Some(Self::Icloud),
             _ => None,
@@ -23,7 +21,6 @@ impl CalendarSourceId {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Ms365Work1 => "ms365_work1",
-            Self::Ms365Work2 => "ms365_work2",
             Self::GoogleGws => "google_gws",
             Self::Icloud => "icloud",
         }
@@ -31,7 +28,7 @@ impl CalendarSourceId {
 
     pub fn protocol(&self) -> Protocol {
         match self {
-            Self::Ms365Work1 | Self::Ms365Work2 => Protocol::Graph,
+            Self::Ms365Work1 => Protocol::Graph,
             Self::GoogleGws => Protocol::GCal,
             Self::Icloud => Protocol::CalDav,
         }

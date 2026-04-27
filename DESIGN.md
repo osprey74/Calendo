@@ -2,7 +2,7 @@
 
 ## 概要
 
-複数カレンダーアカウント（Microsoft 365 × 2・Google Workspace × 1・iCloud × 1）を統合し、
+複数カレンダーアカウント（Microsoft 365 × 1・Google Workspace × 1・iCloud × 1）を統合し、
 日次・週次のスケジュールを一覧表示・登録・編集できるデスクトップアプリ。
 
 ---
@@ -28,8 +28,7 @@
 
 ```typescript
 type CalendarSourceId =
-  | 'ms365_work1'   // Microsoft 365 アカウント 1
-  | 'ms365_work2'   // Microsoft 365 アカウント 2
+  | 'ms365_work1'   // Microsoft 365
   | 'google_gws'    // Google Workspace
   | 'icloud';       // iCloud CalDAV
 
@@ -46,8 +45,7 @@ type CalendarSource = {
 
 | ID | ラベル | カラー |
 |---|---|---|
-| ms365_work1 | 仕事 A | `#0582AF` |
-| ms365_work2 | 仕事 B | `#E65C00` |
+| ms365_work1 | 仕事 | `#0582AF` |
 | google_gws | Google カレンダー | `#2E7D32` |
 | icloud | プライベート | `#888780` |
 
@@ -104,15 +102,14 @@ type EventUpdateRequest = {
 
 ## 認証方式
 
-### Microsoft 365（ms365_work1 / ms365_work2）
+### Microsoft 365（ms365_work1）
 
 - プロトコル：OAuth2 Authorization Code + PKCE
 - ライブラリ：reqwest（Rust）で手実装 / Tauri plugin-oauth でコールバック受信
 - エンドポイント：`https://login.microsoftonline.com/common/oauth2/v2.0/`
 - スコープ：`Calendars.ReadWrite offline_access User.Read`
-- トークン：アクセストークン + リフレッシュトークンを keyring に保存
-- 2アカウント：同一クライアントID、keyring のキーでアカウントを区別
-  - キー例：`calendo/ms365_work1/access_token`
+- トークン：アクセストークンはインメモリキャッシュ、リフレッシュトークンは keyring にチャンク分割保存
+  - キー例：`calendo/ms365_work1.refresh.meta`, `calendo/ms365_work1.refresh.0` ...
 
 ### Google Workspace（google_gws）
 
@@ -268,8 +265,7 @@ src/
 ┌─ Sidebar ───┬─ MainPanel ─────────────────────────────┐
 │ Microsoft   │                                          │
 │ 365         │  DayView or WeekView                     │
-│  ● 仕事 A  │                                          │
-│  ● 仕事 B  │                                          │
+│  ● 仕事    │                                          │
 │             │                                          │
 │ Google      │                                          │
 │  ● GWS     │                                          │

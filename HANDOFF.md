@@ -8,7 +8,7 @@
 
 ## プロジェクト概要
 
-複数カレンダーアカウント（Microsoft 365 × 2・Google Workspace × 1・iCloud × 1）を統合し、
+複数カレンダーアカウント（Microsoft 365 × 1・Google Workspace × 1・iCloud × 1）を統合し、
 日次・週次のスケジュールを一覧表示・登録・編集できるデスクトップアプリ。
 
 - **リポジトリ**: 未作成
@@ -39,10 +39,11 @@
 
 | ID | ラベル | プロトコル | デフォルト色 | 認証方式 |
 |---|---|---|---|---|
-| `ms365_work1` | 仕事 A | Microsoft Graph | `#0582AF` | OAuth2 + PKCE |
-| `ms365_work2` | 仕事 B | Microsoft Graph | `#E65C00` | OAuth2 + PKCE |
+| `ms365_work1` | 仕事 | Microsoft Graph | `#0582AF` | OAuth2 + PKCE |
 | `google_gws` | Google カレンダー | Google Calendar API v3 | `#2E7D32` | OAuth2 + PKCE |
 | `icloud` | プライベート | CalDAV | `#888780` | アプリ専用パスワード |
+
+> 当初は Microsoft 365 を 2 アカウント統合する設計だったが、2 つ目のアカウントは Azure 管理者によるアプリ承認が必要なため、Phase 1 接続検証時点で 1 アカウント運用に変更（2026-04-27）。
 
 ---
 
@@ -105,7 +106,7 @@ gh secret set GOOGLE_CLIENT_SECRET --repo osprey74/Calendo
 - [x] `tauri-plugin-store` 導入（設定永続化）
 - [x] `keyring` crate 追加・OS Keychain 読み書きラッパー実装（[src-tauri/src/auth/keyring.rs](src-tauri/src/auth/keyring.rs)）
 - [x] PKCE コード生成・トークン交換・リフレッシュ共通実装（[src-tauri/src/auth/oauth.rs](src-tauri/src/auth/oauth.rs)）
-- [x] Microsoft Graph OAuth フロー実装（`auth_start("ms365_work1" | "ms365_work2")`）
+- [x] Microsoft Graph OAuth フロー実装（`auth_start("ms365_work1")`）
 - [x] Google Calendar OAuth フロー実装（`auth_start("google_gws")`）
 - [x] iCloud アプリ専用パスワード保存コマンド（`auth_icloud_save`）
 - [x] iCloud CalDAV 接続確認（`PROPFIND /` で principal 到達確認、[src-tauri/src/auth/icloud.rs](src-tauri/src/auth/icloud.rs)）

@@ -10,7 +10,7 @@ Microsoft 365・Google Workspace・iCloud のカレンダーを統合し、日�
 
 | ソース | プロトコル | 認証方式 |
 |---|---|---|
-| Microsoft 365（2 アカウント） | Microsoft Graph | OAuth2 + PKCE |
+| Microsoft 365 | Microsoft Graph | OAuth2 + PKCE |
 | Google Workspace | Google Calendar API v3 | OAuth2 + PKCE |
 | iCloud | CalDAV | アプリ専用パスワード |
 

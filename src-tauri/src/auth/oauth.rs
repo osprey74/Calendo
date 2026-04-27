@@ -23,7 +23,7 @@ pub struct OAuthProvider {
 
 pub fn provider_for(source_id: CalendarSourceId) -> AppResult<OAuthProvider> {
     match source_id {
-        CalendarSourceId::Ms365Work1 | CalendarSourceId::Ms365Work2 => Ok(OAuthProvider {
+        CalendarSourceId::Ms365Work1 => Ok(OAuthProvider {
             auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
             token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
             scope: "Calendars.ReadWrite offline_access User.Read",

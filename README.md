@@ -10,7 +10,7 @@ A unified desktop calendar client that aggregates Microsoft 365, Google Workspac
 
 | Source | Protocol | Authentication |
 |---|---|---|
-| Microsoft 365 (×2 accounts) | Microsoft Graph | OAuth2 + PKCE |
+| Microsoft 365 | Microsoft Graph | OAuth2 + PKCE |
 | Google Workspace | Google Calendar API v3 | OAuth2 + PKCE |
 | iCloud | CalDAV | App-specific password |
 

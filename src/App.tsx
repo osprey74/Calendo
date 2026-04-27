@@ -14,20 +14,17 @@ import "./App.css";
 function App() {
   const [statuses, setStatuses] = useState<Record<CalendarSourceId, AuthStatus | null>>({
     ms365_work1: null,
-    ms365_work2: null,
     google_gws: null,
     icloud: null,
   });
   const [busy, setBusy] = useState<CalendarSourceId | null>(null);
   const [calendars, setCalendars] = useState<Record<CalendarSourceId, CalendarMeta[] | null>>({
     ms365_work1: null,
-    ms365_work2: null,
     google_gws: null,
     icloud: null,
   });
   const [errors, setErrors] = useState<Record<CalendarSourceId, string | null>>({
     ms365_work1: null,
-    ms365_work2: null,
     google_gws: null,
     icloud: null,
   });
