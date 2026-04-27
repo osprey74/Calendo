@@ -110,19 +110,21 @@ gh secret set GOOGLE_CLIENT_SECRET --repo osprey74/Calendo
 - [x] Google Calendar OAuth フロー実装（`auth_start("google_gws")`）
 - [x] iCloud アプリ専用パスワード保存コマンド（`auth_icloud_save`）
 - [x] iCloud CalDAV 接続確認（`PROPFIND /` で principal 到達確認、[src-tauri/src/auth/icloud.rs](src-tauri/src/auth/icloud.rs)）
-- [x] 各ソースの動作確認用フロント実装（[src/App.tsx](src/App.tsx)：4 ソース連結カード + iCloud 入力フォーム）
+- [x] 各ソースの動作確認用フロント実装（[src/App.tsx](src/App.tsx)：3 ソース連結カード + iCloud 入力フォーム）
 - [x] `cargo check` / `npm run build` 通過
 - [x] OAuth クライアント ID 注入用 [src-tauri/build.rs](src-tauri/build.rs)（`.env` 読み取り → `cargo:rustc-env=`）
-- [ ] **実機動作確認**: ローカル `.env` 作成 → `npm run tauri dev` → 4 ソースの接続フロー確認
+- [x] **実機動作確認 (2026-04-27)**: 3 ソース（MS365 / Google / iCloud）すべて接続成功・カレンダー一覧取得確認
 
 #### Phase 1 実装メモ
 
 - OAuth Client ID／Secret は **コンパイル時 env 注入**（`option_env!`）。dev 時は `g:/dev/calendo/.env` に記入、CI は GitHub Secrets。
 - `tauri-plugin-oauth` v2 の `start(handler)` は引数 1 つ（FnMut(String)）。redirect_uri は `http://localhost:<エフェメラルポート>` で生成。
 - Azure / Google の OAuth 設定で **リダイレクト URI に `http://localhost`（パブリッククライアント）を登録**することを忘れないこと（Azure はパブリッククライアントフローを有効化、Google はデスクトップアプリ種別なら自動）。
-- keyring エントリ命名: service=`calendo`, user=`<source_id>.tokens` または `icloud.credentials`。
+- **MS Graph refresh token は Windows Credential Manager の 2560-byte 制限を超える** → `<source>.refresh.meta` + `<source>.refresh.{0..N}` のチャンク分割保存（[src-tauri/src/auth/keyring.rs](src-tauri/src/auth/keyring.rs)）。
+- access_token は keyring に永続化せず、`OnceLock<Mutex<HashMap>>` のインメモリキャッシュのみ。再起動後の最初の API 呼び出しで refresh_token から再取得。
 - iCloud 認証は `auth_icloud_save` で **保存前に PROPFIND で疎通確認**（401 なら拒否）。
 - CalDAV のサブカレンダー列挙は `caldav.rs` で空リストを返す **スタブ状態**（principal 到達確認のみ）。完全な enumerate は Phase 2 で実装。
+- 診断用 `auth_debug_clients` コマンドで注入されたクライアント ID をマスク表示（フロント上部の debug-bar）。
 
 ### Phase 2：イベント取得・表示
 
