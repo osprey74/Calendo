@@ -49,11 +49,89 @@ impl StoredTokens {
     }
 }
 
+/// Windows Credential Manager limits each Credential Blob to 2560 bytes.
+/// UTF-16 encoding doubles each ASCII char, so the practical char limit is
+/// ~1280. Microsoft Graph refresh tokens (especially with offline_access)
+/// regularly exceed that. We chunk the value across multiple keyring entries
+/// to keep storage inside the OS keychain.
+const CHUNK_CHARS: usize = 1000;
+
+fn save_string_chunked(source_id: CalendarSourceId, slot: &str, value: &str) -> AppResult<()> {
+    let chars: Vec<char> = value.chars().collect();
+    let chunks: Vec<String> = chars
+        .chunks(CHUNK_CHARS)
+        .map(|c| c.iter().collect())
+        .collect();
+    let total = chunks.len().max(1);
+
+    entry(source_id, &format!("{slot}.meta"))?
+        .set_password(&total.to_string())?;
+
+    for (i, s) in chunks.iter().enumerate() {
+        entry(source_id, &format!("{slot}.{i}"))?.set_password(s)?;
+    }
+
+    // Clean up trailing chunks left over from a previous longer save.
+    let mut i = total;
+    while i < total + 32 {
+        let chunk_entry = entry(source_id, &format!("{slot}.{i}"))?;
+        match chunk_entry.delete_credential() {
+            Ok(()) => i += 1,
+            Err(keyring::Error::NoEntry) => break,
+            Err(e) => return Err(AppError::from(e)),
+        }
+    }
+    Ok(())
+}
+
+fn load_string_chunked(source_id: CalendarSourceId, slot: &str) -> AppResult<Option<String>> {
+    let total: usize = match entry(source_id, &format!("{slot}.meta"))?.get_password() {
+        Ok(s) => s.parse().unwrap_or(0),
+        Err(keyring::Error::NoEntry) => return Ok(None),
+        Err(e) => return Err(AppError::from(e)),
+    };
+    if total == 0 {
+        return Ok(None);
+    }
+
+    let mut buf = String::new();
+    for i in 0..total {
+        match entry(source_id, &format!("{slot}.{i}"))?.get_password() {
+            Ok(s) => buf.push_str(&s),
+            Err(keyring::Error::NoEntry) => return Ok(None),
+            Err(e) => return Err(AppError::from(e)),
+        }
+    }
+    Ok(Some(buf))
+}
+
+fn delete_string_chunked(source_id: CalendarSourceId, slot: &str) -> AppResult<()> {
+    let meta_entry = entry(source_id, &format!("{slot}.meta"))?;
+    let total: usize = meta_entry
+        .get_password()
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    match meta_entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Err(e) => return Err(AppError::from(e)),
+    }
+
+    let upper = total.max(16);
+    for i in 0..upper {
+        let chunk_entry = entry(source_id, &format!("{slot}.{i}"))?;
+        match chunk_entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(AppError::from(e)),
+        }
+    }
+    Ok(())
+}
+
 pub fn save_tokens(source_id: CalendarSourceId, tokens: &StoredTokens) -> AppResult<()> {
-    // Persist refresh_token only — access tokens go to in-memory cache.
-    let refresh_entry = entry(source_id, "refresh")?;
     if let Some(rt) = tokens.refresh_token.as_ref() {
-        refresh_entry.set_password(rt)?;
+        save_string_chunked(source_id, "refresh", rt)?;
     }
 
     if !tokens.access_token.is_empty() {
@@ -69,12 +147,7 @@ pub fn save_tokens(source_id: CalendarSourceId, tokens: &StoredTokens) -> AppRes
 }
 
 pub fn load_tokens(source_id: CalendarSourceId) -> AppResult<Option<StoredTokens>> {
-    let refresh_token = match entry(source_id, "refresh")?.get_password() {
-        Ok(s) => Some(s),
-        Err(keyring::Error::NoEntry) => None,
-        Err(e) => return Err(AppError::from(e)),
-    };
-
+    let refresh_token = load_string_chunked(source_id, "refresh")?;
     if refresh_token.is_none() {
         return Ok(None);
     }
@@ -82,8 +155,6 @@ pub fn load_tokens(source_id: CalendarSourceId) -> AppResult<Option<StoredTokens
     let cached = access_cache().lock().unwrap().get(&source_id).cloned();
     let (access_token, expires_at) = match cached {
         Some(c) => (c.access_token, c.expires_at),
-        // No in-memory cache yet (likely first call after app launch). Caller
-        // is expected to invoke ensure_fresh() which will refresh on demand.
         None => (String::new(), 0),
     };
 
@@ -96,8 +167,9 @@ pub fn load_tokens(source_id: CalendarSourceId) -> AppResult<Option<StoredTokens
 
 pub fn delete_tokens(source_id: CalendarSourceId) -> AppResult<()> {
     access_cache().lock().unwrap().remove(&source_id);
-    // Clean up legacy entries from earlier Phase 1 iterations as well.
-    for slot in ["refresh", "access", "tokens"] {
+    delete_string_chunked(source_id, "refresh")?;
+    // Clean up legacy entries from earlier Phase 1 iterations.
+    for slot in ["access", "tokens"] {
         match entry(source_id, slot)?.delete_credential() {
             Ok(_) | Err(keyring::Error::NoEntry) => {}
             Err(e) => return Err(AppError::from(e)),
