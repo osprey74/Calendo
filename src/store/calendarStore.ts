@@ -15,6 +15,13 @@ import {
   eventUpdate,
   eventsFetch,
 } from "../lib/tauri";
+import {
+  loadSettings,
+  saveCalendarEnabled,
+  saveSourceEnabled,
+  saveView,
+} from "../lib/persistence";
+import { toast } from "./toastStore";
 
 type RecordBy<T extends string, V> = Record<T, V>;
 
@@ -53,6 +60,13 @@ type Actions = {
   loadCalendars: (sourceId: CalendarSourceId) => Promise<void>;
   loadEvents: () => Promise<void>;
   invalidate: () => void;
+  /** Reset cached calendar list for a source (e.g., after disconnect) so the events
+   *  fetch and the onboarding-state detection treat the source as fresh. */
+  clearSourceCalendars: (sourceId: CalendarSourceId) => void;
+
+  /** Pull persisted settings off disk and merge into state. Should be awaited before
+   *  the first `loadEvents()` so the events fetch reflects user-saved filters. */
+  hydrate: () => Promise<void>;
 
   createEvent: (draft: EventDraft) => Promise<UnifiedEvent>;
   updateEvent: (eventId: string, draft: EventDraft) => Promise<UnifiedEvent>;
@@ -96,6 +110,7 @@ export const useCalendarStore = create<CalendarStore>((set, get) => ({
   setView: (v) => {
     if (get().view === v) return;
     set({ view: v });
+    void saveView(v);
     void get().loadEvents();
   },
 
@@ -117,18 +132,20 @@ export const useCalendarStore = create<CalendarStore>((set, get) => ({
   },
 
   toggleSource: (id) => {
-    set((state) => ({
-      sourceEnabled: { ...state.sourceEnabled, [id]: !state.sourceEnabled[id] },
-    }));
+    set((state) => {
+      const next = { ...state.sourceEnabled, [id]: !state.sourceEnabled[id] };
+      void saveSourceEnabled(next);
+      return { sourceEnabled: next };
+    });
   },
 
   toggleCalendar: (sourceId, calendarId) => {
     const key = calKey(sourceId, calendarId);
     set((state) => {
       const current = state.calendarEnabled[key] ?? true;
-      return {
-        calendarEnabled: { ...state.calendarEnabled, [key]: !current },
-      };
+      const next = { ...state.calendarEnabled, [key]: !current };
+      void saveCalendarEnabled(next);
+      return { calendarEnabled: next };
     });
   },
 
@@ -139,6 +156,7 @@ export const useCalendarStore = create<CalendarStore>((set, get) => ({
       for (const c of list) {
         next[calKey(sourceId, c.id)] = enabled;
       }
+      void saveCalendarEnabled(next);
       return { calendarEnabled: next };
     });
   },
@@ -231,24 +249,59 @@ export const useCalendarStore = create<CalendarStore>((set, get) => ({
     set({ events: [], loadedRange: null });
   },
 
+  clearSourceCalendars: (sourceId) => {
+    set((state) => ({
+      calendars: { ...state.calendars, [sourceId]: null },
+    }));
+  },
+
+  hydrate: async () => {
+    const persisted = await loadSettings();
+    set((state) => ({
+      view: persisted.view ?? state.view,
+      sourceEnabled: persisted.sourceEnabled
+        ? { ...state.sourceEnabled, ...persisted.sourceEnabled }
+        : state.sourceEnabled,
+      calendarEnabled: persisted.calendarEnabled ?? state.calendarEnabled,
+    }));
+  },
+
   createEvent: async (draft) => {
-    const created = await eventCreate(draft.sourceId, draft.calendarId, draft);
-    // Refresh the current visible window so recurring expansions / server-side adjustments
-    // (e.g., Graph rounding fractional seconds) are picked up rather than relying on the
-    // optimistic local insert.
-    await get().loadEvents();
-    return created;
+    try {
+      const created = await eventCreate(draft.sourceId, draft.calendarId, draft);
+      // Refresh the current visible window so recurring expansions / server-side adjustments
+      // (e.g., Graph rounding fractional seconds) are picked up rather than relying on the
+      // optimistic local insert.
+      await get().loadEvents();
+      toast.success(`「${draft.title}」を作成しました`);
+      return created;
+    } catch (e) {
+      toast.error(`作成に失敗しました: ${e}`);
+      throw e;
+    }
   },
 
   updateEvent: async (eventId, draft) => {
-    const updated = await eventUpdate(draft.sourceId, eventId, { draft });
-    await get().loadEvents();
-    return updated;
+    try {
+      const updated = await eventUpdate(draft.sourceId, eventId, { draft });
+      await get().loadEvents();
+      toast.success(`「${draft.title}」を更新しました`);
+      return updated;
+    } catch (e) {
+      toast.error(`更新に失敗しました: ${e}`);
+      throw e;
+    }
   },
 
   deleteEvent: async (sourceId, calendarId, eventId) => {
-    await eventDelete(sourceId, calendarId, eventId);
-    await get().loadEvents();
+    try {
+      await eventDelete(sourceId, calendarId, eventId);
+      await get().loadEvents();
+      toast.success("削除しました");
+    } catch (e) {
+      toast.error(`削除に失敗しました: ${e}`);
+      throw e;
+    }
   },
 }));
 

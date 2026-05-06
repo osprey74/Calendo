@@ -46,6 +46,10 @@ pub async fn events_fetch(
             Some(filter) => filter.clone(),
             None => match calendars::fetch_calendars(source_id).await {
                 Ok(list) => list.into_iter().map(|c| c.id).collect(),
+                Err(e) if is_disconnected_source(&e) => {
+                    log::warn!("skipping disconnected source {source_id:?}: {e}");
+                    continue;
+                }
                 Err(e) => {
                     if is_recoverable_per_calendar(&e) {
                         log::warn!("calendars_fetch failed for {source_id:?}: {e}");
@@ -56,9 +60,19 @@ pub async fn events_fetch(
             },
         };
 
+        let mut source_disconnected = false;
         for cal_id in target_calendar_ids {
+            if source_disconnected {
+                break;
+            }
             match calendars::fetch_events(source_id, &cal_id, &date_from, &date_to).await {
                 Ok(mut from_source) => events.append(&mut from_source),
+                Err(e) if is_disconnected_source(&e) => {
+                    log::warn!(
+                        "source {source_id:?} disconnected mid-fetch; skipping rest: {e}"
+                    );
+                    source_disconnected = true;
+                }
                 Err(e) => {
                     if is_recoverable_per_calendar(&e) {
                         log::warn!(
@@ -87,6 +101,17 @@ fn is_recoverable_per_calendar(e: &AppError) -> bool {
         AppError::CalDav(_) => true,
         _ => false,
     }
+}
+
+/// True when the source's auth is gone (revoked, never set, or refresh expired). The UI
+/// already tracks per-source connection state via `auth_status`, so events_fetch should
+/// silently skip these rather than erroring the whole fetch — otherwise disconnecting
+/// one source poisons the view for the others that are still connected.
+fn is_disconnected_source(e: &AppError) -> bool {
+    matches!(
+        e,
+        AppError::NotAuthenticated(_) | AppError::TokenExpired
+    )
 }
 
 #[tauri::command]

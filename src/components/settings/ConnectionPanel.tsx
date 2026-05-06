@@ -14,6 +14,7 @@ import "./ConnectionPanel.css";
 export function ConnectionPanel({ onClose }: { onClose: () => void }) {
   const loadCalendars = useCalendarStore((s) => s.loadCalendars);
   const loadEvents = useCalendarStore((s) => s.loadEvents);
+  const clearSourceCalendars = useCalendarStore((s) => s.clearSourceCalendars);
 
   const [statuses, setStatuses] = useState<Record<CalendarSourceId, AuthStatus | null>>({
     ms365_work1: null,
@@ -78,6 +79,10 @@ export function ConnectionPanel({ onClose }: { onClose: () => void }) {
         ...prev,
         [s.id]: { sourceId: s.id, connected: false },
       }));
+      // Drop the cached calendar list so events_fetch doesn't try to use stale ids,
+      // and so the onboarding hint can detect "no connections" once all sources are
+      // disconnected.
+      clearSourceCalendars(s.id);
       await loadEvents();
     } catch (e) {
       setError(s.id, String(e));

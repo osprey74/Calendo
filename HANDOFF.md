@@ -2,7 +2,7 @@
 
 **最終更新**: 2026-05-06
 **バージョン**: v0.1.0（開発中）
-**フェーズ**: Phase 3.0（イベント作成・編集・削除）— 全 3 ソースで CRUD 実装完了、実機動作確認待ち。繰り返しスコープ別編集は Phase 4 に先送り
+**フェーズ**: Phase 4.0（仕上げ：永続化・トースト・オンボーディング・アイコン）— 実装完了、実機動作確認待ち。繰り返しスコープ別編集と 401 自動リトライは Phase 4.x に持ち越し
 
 ---
 
@@ -228,17 +228,39 @@ gh secret set GOOGLE_CLIENT_SECRET --repo osprey74/Calendo
 
 ### Phase 4：設定・仕上げ
 
-- [ ] SettingsModal 実装
-  - アカウント接続状態（接続済 / 未接続）
-  - 接続・再接続・切断ボタン
-  - iCloud Apple ID + アプリ専用パスワード入力
-  - サブカレンダー一覧・表示 ON/OFF・色・ラベルカスタマイズ
-  - 書き込み不可カレンダーは読み取り専用バッジ
-- [ ] Toast 実装（成功・エラー通知）
-- [ ] 自動トークンリフレッシュ（401 検出 → リフレッシュ → リトライ）
-- [ ] エラーハンドリング全網羅（DESIGN.md「エラーハンドリング方針」表）
-- [ ] アプリアイコン作成・配置
-- [ ] 初回起動時オンボーディング（最小限：「設定からアカウントを接続してください」）
+#### Phase 4.0（実装済み）
+
+- [x] アプリアイコン配置（[src-tauri/icons/](src-tauri/icons/) — `npx tauri icon` で 1024x1024 から全プラットフォーム向けサイズを生成）
+- [x] Toast 実装（成功・エラー通知 — [ToastHost.tsx](src/components/toast/ToastHost.tsx) + [toastStore.ts](src/store/toastStore.ts)）
+  - create / update / delete の結果を `toast.success` / `toast.error` で表示
+  - エラーは 6 秒、成功・情報は 4 秒で自動消去
+- [x] Tauri store plugin で設定永続化（[src/lib/persistence.ts](src/lib/persistence.ts)）
+  - 永続化対象: `view`（日/週）、`sourceEnabled`（ソース ON/OFF）、`calendarEnabled`（サブカレンダー ON/OFF）
+  - 起動時に `hydrate()` でロード→`loadEvents()` の順で適用
+  - 保存ファイル: `<app config>/settings.json`（Windows: `%APPDATA%\com.osprey74.calendo\`、macOS: `~/Library/Application Support/com.osprey74.calendo/`）
+- [x] ConnectionPanel: 既存実装で接続管理は既に網羅されていたため Phase 4.0 では再利用（接続状態・接続/切断ボタン・iCloud 入力フォーム・OAuth 診断バー）
+- [x] 初回起動時オンボーディング（[AppShell.tsx](src/components/layout/AppShell.tsx)）
+  - すべてのソースのカレンダーが空 / 未取得かつイベント 0 件のとき、メイン領域中央に「ようこそ」カードを表示
+  - 「設定を開く」ボタンで ConnectionPanel を直接起動
+
+#### Phase 4.0 実装メモ
+
+- **永続化のタイミング**: `setView` / `toggleSource` / `toggleCalendar` / `setAllCalendarsEnabled` のミューテーションごとに `void saveXxx(...)` で fire-and-forget 保存。ストアは即座に新しい状態を返し、IO は背景で進行
+- **`hydrate()` 設計**: ストア初期状態（全ソース ON / view: "week"）が defaults。永続化された値があればその上にマージ。`AppShell` の最初の `useEffect` で `hydrate()` を `await` してから `loadEvents()` を呼び、ハイドレーション前のフィルタが反映されない一発目フェッチを回避
+- **Toast の使い方**: `toast.success(msg)` / `toast.error(msg)` / `toast.info(msg)` の関数 API。`useToastStore.getState().show(...)` のショートハンド。React 外（store action 等）からも呼べる
+- **Onboarding 検出**: `loading=false && events.length===0 && すべてのソース calendars が null か []`。一旦接続して再起動した状態（calendars が取得済み・events 0 件）では出ない仕様
+- **ConnectionPanel の SettingsModal 化**: HANDOFF 当初想定では SettingsModal にカレンダー表示設定（色・ラベル上書き）を統合する案だったが、Phase 4.0 では既存 ConnectionPanel をそのまま流用。色・ラベルのカスタマイズは Phase 5+ に先送り
+
+#### Phase 4.x 持ち越し
+
+- [ ] 繰り返しイベント編集ダイアログ（「この1件のみ」「以降すべて」「すべて」）
+- [ ] Graph 繰り返しスコープ別の API 呼び出し分岐（`thisAndFollowing` / `singleInstance` / `master`）
+- [ ] Google Calendar 繰り返し系（`recurringEventId` 連動）
+- [ ] CalDAV 繰り返し: `RECURRENCE-ID` 付き VEVENT 部分上書き、`EXDATE` 追記による単一インスタンス削除
+- [ ] 自動トークンリフレッシュ（401 検出 → リフレッシュ → リトライ）— 現状 `ensure_fresh` の事前チェックで 95% カバー、サーバ側のクロックスキューや revoke は再認証が必要
+- [ ] エラーハンドリング全網羅（DESIGN.md「エラーハンドリング方針」表）— 現状は Toast にエラー文字列を投げるのみ
+- [ ] SettingsModal でサブカレンダーの色・ラベル上書き（カスタマイズ）
+- [ ] イベントのソース／カレンダー間移動（現状: 削除＋再作成）
 
 ### Phase 5：リリース準備
 

@@ -389,20 +389,42 @@ function buildInitialState(mode: Mode) {
       body: e.body ?? "",
     };
   }
-  // Create mode: anchor on the current view date with a 1-hour default block.
-  const date = ymd(mode.defaultDate);
+  // Create mode: ceil "now" to the next 30-minute boundary for start, +1h for end.
+  // 18:10 → 18:30 / 19:30. 18:30 → 18:30 / 19:30 (already on boundary). 23:50 → 00:00
+  // tomorrow / 01:00 tomorrow (rolls past midnight).
+  const startCeil = ceilToHalfHour(mode.defaultDate);
+  const endShift = shiftClock(startCeil.date, startCeil.time, 60);
   return {
     sourceId: "ms365_work1" as CalendarSourceId,
     calendarId: "",
     title: "",
     isAllDay: false,
-    startDate: date,
-    startTime: "10:00",
-    endDate: date,
-    endTime: "11:00",
+    startDate: startCeil.date,
+    startTime: startCeil.time,
+    endDate: endShift.date,
+    endTime: endShift.time,
     location: "",
     body: "",
   };
+}
+
+/** Round a Date forward to the next 30-minute boundary, returning matching form parts.
+ *  Already-on-boundary values are kept as-is (so 18:30 stays 18:30). Rolling past
+ *  midnight is handled by re-deriving the date string from the rolled Date. */
+function ceilToHalfHour(d: Date): { date: string; time: string } {
+  const minutes = d.getHours() * 60 + d.getMinutes();
+  const ceiled = Math.ceil(minutes / 30) * 30;
+  const out = new Date(d);
+  out.setSeconds(0, 0);
+  if (ceiled >= 24 * 60) {
+    out.setDate(out.getDate() + 1);
+    out.setHours(0, 0, 0, 0);
+  } else {
+    out.setHours(Math.floor(ceiled / 60), ceiled % 60, 0, 0);
+  }
+  const hh = String(out.getHours()).padStart(2, "0");
+  const mm = String(out.getMinutes()).padStart(2, "0");
+  return { date: ymd(out), time: `${hh}:${mm}` };
 }
 
 const DURATION_PRESETS: { label: string; minutes: number }[] = [
