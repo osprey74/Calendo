@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AuthStatus, CalendarMeta, CalendarSourceId, ClientDebugInfo } from "../types";
+import type {
+  AuthStatus,
+  CalendarMeta,
+  CalendarSourceId,
+  ClientDebugInfo,
+  UnifiedEvent,
+} from "../types";
 
 export const authStart = (sourceId: CalendarSourceId) =>
   invoke<AuthStatus>("auth_start", { sourceId });
@@ -18,5 +24,19 @@ export const authIcloudSave = (appleId: string, appPassword: string) =>
 
 export const calendarsFetch = (sourceId: CalendarSourceId) =>
   invoke<CalendarMeta[]>("calendars_fetch", { sourceId });
+
+export const eventsFetch = (
+  sourceIds: CalendarSourceId[],
+  /** Per-source filter map. Pass `undefined` to query every calendar of every source. */
+  calendarIds: Partial<Record<CalendarSourceId, string[]>> | undefined,
+  dateFrom: string,
+  dateTo: string,
+) =>
+  invoke<UnifiedEvent[]>("events_fetch", {
+    sourceIds,
+    calendarIds: calendarIds ?? null,
+    dateFrom,
+    dateTo,
+  });
 
 export const authDebugClients = () => invoke<ClientDebugInfo>("auth_debug_clients");

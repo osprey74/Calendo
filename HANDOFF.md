@@ -1,8 +1,8 @@
 # HANDOFF.md — Calendo
 
-**最終更新**: 2026-04-27
+**最終更新**: 2026-05-06
 **バージョン**: v0.1.0（開発中）
-**フェーズ**: Phase 1（認証・接続確立）— Rust 認証層・最小フロント実装完了、実機動作確認待ち
+**フェーズ**: Phase 2（イベント取得・表示）— 3 ソース横断のカレンダー一覧／イベント取得・日次/週次 UI 実装完了、実機動作確認待ち
 
 ---
 
@@ -130,29 +130,72 @@ gh secret set GOOGLE_CLIENT_SECRET --repo osprey74/Calendo
 
 #### 2-A：カレンダー一覧取得
 
-- [ ] Graph API カレンダー一覧（`GET /me/calendars`）→ `CalendarMeta[]`
-- [ ] Google Calendar `calendarList.list` → `CalendarMeta[]`
-- [ ] CalDAV `PROPFIND` でカレンダーホーム → 各 `calendar` リソース列挙
+- [x] Graph API カレンダー一覧（`GET /me/calendars`）→ `CalendarMeta[]`（[src-tauri/src/calendars/graph.rs](src-tauri/src/calendars/graph.rs)）
+- [x] Google Calendar `calendarList.list` → `CalendarMeta[]`（[src-tauri/src/calendars/gcal.rs](src-tauri/src/calendars/gcal.rs)）
+- [x] CalDAV `PROPFIND` でカレンダーホーム → 各 `calendar` リソース列挙（[src-tauri/src/calendars/caldav.rs](src-tauri/src/calendars/caldav.rs)、principal → calendar-home-set → Depth:1 enumerate）
 
 #### 2-B：イベント取得
 
-- [ ] Graph API `calendarView`（startDateTime / endDateTime）→ 繰り返し展開済みインスタンス取得
-- [ ] Google Calendar `events.list`（`singleEvents=true&orderBy=startTime`）→ 展開済みインスタンス
-- [ ] CalDAV `REPORT` クエリ（`time-range`）→ VEVENT 群、RRULE は手動展開
-- [ ] UnifiedEvent への正規化・JST 変換（[src/utils/eventUtils.ts](src/utils/eventUtils.ts), [src-tauri/src/models.rs](src-tauri/src/models.rs)）
-- [ ] 繰り返しイベントの展開（CalDAV のみ自前 RRULE 展開、Graph / GCal はサーバ側で展開済み）
+- [x] Graph API `calendarView`（startDateTime / endDateTime）→ 繰り返し展開済みインスタンス取得（`Prefer: outlook.timezone="UTC"` で UTC 統一受信、ページネーション対応）
+- [x] Google Calendar `events.list`（`singleEvents=true&orderBy=startTime`）→ 展開済みインスタンス（`nextPageToken` 対応、`status=cancelled` 除外）
+- [x] CalDAV `REPORT` クエリ（`time-range` + `<C:expand>` でサーバ側展開）→ VEVENT 群
+- [x] UnifiedEvent への正規化・JST 変換（[src-tauri/src/calendars/ical.rs](src-tauri/src/calendars/ical.rs)：TZID→JST 変換、UTC→JST 変換、終日イベント YYYY-MM-DD 形式）
+- [x] 繰り返しイベント展開：Graph / GCal はサーバ側で展開済み、CalDAV は `<C:expand>` でサーバ側展開（自前 RRULE 展開は不要に）
+- [x] `events_fetch` コマンド：複数ソース／複数カレンダーをまたいで集約（[src-tauri/src/commands/calendar_commands.rs](src-tauri/src/commands/calendar_commands.rs)）
 
 #### 2-C：UI
 
-- [ ] AppShell（サイドバー + メインパネル）
-- [ ] TopBar（日/週切替・日付ナビ・新規ボタン）
-- [ ] CalendarSidebar（ソース・サブカレンダー ON/OFF トグル）
-- [ ] DayView（時間軸縦スクロール）
-- [ ] WeekView（7 日横並び）
-- [ ] AllDayBar（終日イベント帯）
-- [ ] EventCard（一覧表示用）
-- [ ] Zustand store（`calendarStore` / `settingsStore`）
-- [ ] フィルタ：ソース ON/OFF・サブカレンダー ON/OFF
+- [x] AppShell（[src/components/layout/AppShell.tsx](src/components/layout/AppShell.tsx)：TopBar + Sidebar + Main の縦/横グリッド）
+- [x] TopBar（[src/components/layout/TopBar.tsx](src/components/layout/TopBar.tsx)：日/週切替・前後ナビ・今日ボタン・設定モーダル起動）
+- [x] CalendarSidebar（[src/components/sidebar/CalendarSidebar.tsx](src/components/sidebar/CalendarSidebar.tsx)：ソース ON/OFF・サブカレンダー ON/OFF・RO バッジ）
+- [x] DayView（[src/components/views/DayView.tsx](src/components/views/DayView.tsx)：時間軸縦スクロール、レーン割当で重複表示）
+- [x] WeekView（[src/components/views/WeekView.tsx](src/components/views/WeekView.tsx)：7 日横並び、日毎レーン割当、本日ハイライト）
+- [x] AllDayBar（[src/components/events/AllDayBar.tsx](src/components/events/AllDayBar.tsx)：終日イベント帯）
+- [x] EventBlock（[src/components/events/EventBlock.tsx](src/components/events/EventBlock.tsx)：時間ベースの絶対配置・レーン分割）
+- [x] Zustand store（[src/store/calendarStore.ts](src/store/calendarStore.ts)：events/calendars/sourceEnabled/calendarEnabled/view/anchor）
+- [x] フィルタ：ソース ON/OFF・サブカレンダー ON/OFF（クライアント側 visibleEvents セレクタ）
+- [x] ConnectionPanel モーダル（[src/components/settings/ConnectionPanel.tsx](src/components/settings/ConnectionPanel.tsx)：接続状態表示・接続/切断・iCloud 入力フォーム）
+
+#### Phase 2 実装メモ
+
+- **CalDAV カレンダー列挙**: PROPFIND `current-user-principal` → PROPFIND `calendar-home-set` → PROPFIND Depth:1 で `<calendar/>` リソースタイプを持つコレクションを抽出。`displayname` / `cs:calendar-color` / `current-user-privilege-set` / `supported-calendar-component-set` を一括取得。
+- **CalDAV イベント取得**: `<C:expand>` を `calendar-query` REPORT に含めることで、サーバ側で繰り返しを展開させる（クライアント側 RRULE 展開不要）。`time-range` フィルタは UTC 形式 `YYYYMMDDTHHMMSSZ`。
+- **タイムゾーン**: 内部表現は JST（ISO 8601 + `+09:00`）に統一。Graph は `Prefer: outlook.timezone="UTC"` で UTC 受信→JST 変換。GCal は元々 RFC3339 オフセット付き→JST 変換。CalDAV は UTC（Z 終端）／TZID 付き／フローティングを `chrono-tz` で JST 変換（フローティングは JST と仮定）。
+- **iCalendar パーサ**: [src-tauri/src/calendars/ical.rs](src-tauri/src/calendars/ical.rs) で line-folding（CRLF + 単一 SP/HTAB の RFC 5545 仕様）、TZID パラメータ、`VALUE=DATE`（終日）、エスケープ（`\,` `\;` `\n`）を処理。`<C:expand>` 前提のため RRULE 展開は未実装。
+- **XML パーサ**: [src-tauri/src/calendars/xmlnode.rs](src-tauri/src/calendars/xmlnode.rs) で quick-xml の Event ストリーミングをツリー化、ローカル名一致で検索（namespace prefix を除去）。
+- **イベント描画**: 1440 分高さの絶対配置グリッド。日内重複は greedy lane assignment で横並び。週ビューは 7 列で同様のレイアウトを各日に適用。
+- **状態管理**: `useCalendarStore` 単一 Zustand ストア。`view`/`anchor` 変更時に `loadEvents()` を自動実行。`sourceEnabled`/`calendarEnabled` でクライアント側フィルタ（バックエンドリクエストにも反映）。永続化は Phase 4 で実装予定。
+- **未実装/Phase 3 以降**: イベント作成・編集・削除（EventModal、繰り返し編集スコープ）、SettingsModal の表示設定（色・ラベルカスタマイズ）、Tauri store plugin による設定永続化、自動トークンリフレッシュ（401→refresh→retry）、Toast 通知、CalDAV PUT/DELETE。
+- **依存追加**: `chrono-tz` v0.10（CalDAV TZID パラメータ→JST 変換用、Graph の名前付きタイムゾーンの予備実装にも使用）。
+
+##### 2026-05-06 動作確認結果
+
+- [x] MS365 イベントが日次/週次ビューに表示されること
+- [x] Google Calendar イベントが日次/週次ビューに表示されること
+- [x] iCloud カレンダー一覧（サブカレンダー含む）が Sidebar に表示されること
+- [x] iCloud イベント（繰り返し含む）が日次/週次ビューに展開表示されること
+- [x] サブカレンダー ON/OFF トグルがイベント表示に反映されること
+- [x] 日/週切替・前後ナビゲーション・「今日」ボタンが期待通り動作すること
+
+##### 2026-05-06 動作確認で発覚した問題と対応
+
+実機テスト中に判明した問題を順次修正：
+
+- **React 19 + Zustand v5 のセレクタ不安定によるレンダーループ** — `useCalendarStore(visibleEvents)` がフィルタ結果の新しい配列を毎回返すため `useSyncExternalStore` で snapshot 不安定→`Maximum update depth exceeded`→白画面。生 state を別個に取得→`useMemo` でフィルタする形に修正（[DayView.tsx](src/components/views/DayView.tsx) / [WeekView.tsx](src/components/views/WeekView.tsx)）
+- **`events_fetch` のソース横断汚染** — フラットな `calendar_ids` を全ソースに iterate していたため、iCloud の URL を MS Graph に投げ込み reqwest URL ビルダー破綻（`builder error`）。API を per-source map (`HashMap<String, Vec<String>>`) に変更（[calendar_commands.rs](src-tauri/src/commands/calendar_commands.rs) / [calendarStore.ts](src/store/calendarStore.ts)）
+- **MS Graph `/me/calendars` のページネーション未対応** — デフォルト 10 件で取りこぼし。`$top=100` + `@odata.nextLink` フォロー対応（[graph.rs](src-tauri/src/calendars/graph.rs)）
+- **カレンダー ID の URL エンコード欠落** — メールアドレスを ID として返すカレンダーで `@` が生のまま URL に入り 400。共通の `percent_encode_segment` を [util.rs](src-tauri/src/calendars/util.rs) に追加し Graph / GCal で利用
+- **per-calendar 4xx で全体停止** — 1 件のカレンダー失敗で全ソースのイベント取得が止まっていた。`is_recoverable_per_calendar()` で 4xx / CalDAV エラーを許容しスキップ継続
+- **終日イベントの翌日表示** — RFC 5545 / Graph / GCal すべて DTEND 排他的なのに `>=` で比較していたため 5/5 のイベントが 5/6 にも重複表示。終日のみ `>` 厳密比較に変更（[eventUtils.ts](src/utils/eventUtils.ts)）
+- **週ビューのヘッダー列ズレ** — 縦スクロールバー幅分だけ時間グリッドが狭くなり、外側のヘッダーと食い違っていた。ヘッダー＋終日帯を `time-grid-scroll` 内に移動し `position: sticky; top: 0` で同一コンテナ管理に統一（[TimeGrid.css](src/components/views/TimeGrid.css)）
+
+##### 2026-05-06 追加した UX 改善
+
+- **イベントクリックで詳細モーダル** — どのカレンダーの予定か一目で分かるよう `EventDetailsModal` を追加。ソース・カレンダー名（+ primary / RO バッジ）・calendar_id・繰り返し情報・event_id まで表示（[EventDetailsModal.tsx](src/components/events/EventDetailsModal.tsx)）
+- **イベントブロックにカレンダー名タグ** — 各イベントカードの 3 行目に所属カレンダー名を常時表示。Tooltip にも「ソース / カレンダー名」を含める
+- **サイドバーのスクロール可視化と sticky ヘッダー** — WebView2 で薄いスクロールバーが視認できない問題に対応し常時 8px 表示。ソースヘッダーを sticky 化
+- **全 ON / 全 OFF クイック切替 + カレンダー件数バッジ** — ソースごとに一括切替ボタンと件数表示を追加（[CalendarSidebar.tsx](src/components/sidebar/CalendarSidebar.tsx) / [calendarStore.ts](src/store/calendarStore.ts) `setAllCalendarsEnabled`）
+- **非表示カレンダーの折りたたみ** — ON/OFF を切った瞬間に「非表示中 N 件」セクションへ移動。クリックで展開し再 ON 可能。取り消し線 + 透過で見た目区別
 
 ### Phase 3：イベント作成・編集・削除
 

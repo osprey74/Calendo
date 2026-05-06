@@ -1,0 +1,236 @@
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  /* Always show a visible scrollbar so calendars below the fold are discoverable
+     (WebView2 hides the default scrollbar until hover, which made overflowing
+     calendars feel "missing"). */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.source-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.source-block:last-child {
+  border-bottom: none;
+}
+
+.source-head {
+  border-left: 3px solid transparent;
+  padding: 8px 10px 6px;
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.source-toggle,
+.cal-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.source-toggle input,
+.cal-toggle input {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.source-label {
+  font-weight: 600;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bulk-actions {
+  display: flex;
+  gap: 6px;
+  padding-left: 22px;
+}
+
+.bulk-btn {
+  font-size: 10px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.bulk-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.bulk-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.source-swatch,
+.cal-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.cal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px 0 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  min-width: 0;
+}
+
+.cal-row:hover {
+  background: var(--surface-2);
+}
+
+.cal-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.primary-tag {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.ro-badge {
+  font-size: 10px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.cal-empty {
+  font-size: 11px;
+  padding: 2px 8px 2px 28px;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.hidden-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 22px;
+}
+
+.hidden-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-family: inherit;
+  text-align: left;
+}
+
+.hidden-toggle:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.hidden-caret {
+  width: 10px;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.hidden-count {
+  margin-left: auto;
+  font-size: 10px;
+  background: var(--surface-2);
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hidden-list {
+  padding: 0;
+}
+
+.cal-row.disabled .cal-name,
+.cal-row.disabled .cal-swatch {
+  opacity: 0.55;
+}
+
+.cal-row.disabled .cal-name {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-muted);
+}

@@ -1,0 +1,147 @@
+.day-view,
+.week-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.time-grid-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* Sticky header pack: contains weekday header + all-day row, stays at the top of the
+   scroll area so the column widths remain identical to the time grid below regardless
+   of whether a vertical scrollbar is showing (the scrollbar only steals width from a
+   single shared container, so headers and grid shrink in lockstep). */
+.week-sticky-top {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.time-grid {
+  display: flex;
+  min-height: 1440px;
+  height: 1440px;
+}
+
+.hour-gutter {
+  width: 56px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+
+.hour-label {
+  flex: 1;
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 1px 6px;
+  border-bottom: 1px dashed transparent;
+}
+
+.day-column {
+  flex: 1;
+  position: relative;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+
+.day-column.today {
+  background: rgba(5, 130, 175, 0.04);
+}
+
+.hour-lines {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hour-line {
+  flex: 1;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.week-columns {
+  display: flex;
+  flex: 1;
+  position: relative;
+}
+
+.week-header {
+  display: flex;
+  background: var(--surface);
+}
+
+.week-header-gutter {
+  width: 56px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+}
+
+.week-day-head {
+  flex: 1;
+  text-align: center;
+  padding: 6px 0;
+  border-right: 1px solid var(--border);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.week-day-head.today .daynum {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: auto;
+}
+
+.week-day-head .weekday {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.week-day-head .daynum {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.week-allday-row {
+  display: flex;
+  border-top: 1px solid var(--border-soft);
+  background: var(--surface);
+}
+
+.week-allday-gutter {
+  width: 56px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 6px;
+  border-right: 1px solid var(--border);
+}
+
+.week-allday-cell {
+  flex: 1;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+
+.week-allday-cell .allday-bar {
+  border-bottom: none;
+  min-height: 24px;
+}
