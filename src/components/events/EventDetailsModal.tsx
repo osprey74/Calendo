@@ -1,8 +1,10 @@
+import { useState } from "react";
 import type { UnifiedEvent } from "../../types";
 import { DEFAULT_SOURCES } from "../../types";
 import { useCalendarStore } from "../../store/calendarStore";
 import { allDayEndInclusive, eventStart, eventEnd } from "../../utils/eventUtils";
 import { formatDateHeading, formatTimeShort, isSameDay } from "../../utils/dateUtils";
+import { EventModal } from "./EventModal";
 import "./EventDetailsModal.css";
 
 export function EventDetailsModal({
@@ -13,17 +15,52 @@ export function EventDetailsModal({
   onClose: () => void;
 }) {
   const calendars = useCalendarStore((s) => s.calendars);
+  const deleteEvent = useCalendarStore((s) => s.deleteEvent);
   const source = DEFAULT_SOURCES.find((s) => s.id === event.sourceId);
   const calendar = calendars[event.sourceId]?.find((c) => c.id === event.calendarId);
   const calendarColor = calendar?.color ?? source?.color ?? "#888";
 
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
   const start = eventStart(event);
   const end = eventEnd(event);
   const startDate = formatDateHeading(start);
-  // For all-day events, DTEND is exclusive — show the last occupied day (inclusive) instead.
   const inclusiveEnd = event.isAllDay ? allDayEndInclusive(event) : end;
   const endDate = formatDateHeading(inclusiveEnd);
   const allDaySingleDay = event.isAllDay && isSameDay(start, inclusiveEnd);
+
+  // Phase 3.0: writes target the event id directly. Recurring events on Graph/GCal accept
+  // edits/deletes on the per-instance id (single-instance scope); CalDAV recurring is not
+  // safely editable yet (see HANDOFF Phase 4 notes), so we disable writes for those.
+  const isCalDavRecurring = event.sourceId === "icloud" && event.isRecurring;
+  const isWritable = (calendar?.isWritable ?? false) && !isCalDavRecurring;
+  const writeBlockReason = !calendar
+    ? "カレンダー一覧未取得"
+    : !calendar.isWritable
+      ? "読み取り専用カレンダー"
+      : isCalDavRecurring
+        ? "iCloud 繰り返しイベントの編集は未対応"
+        : null;
+
+  const handleDelete = async () => {
+    if (!confirm(`「${event.title || "(無題)"}」を削除しますか？`)) return;
+    setDeleting(true);
+    setActionError(null);
+    try {
+      await deleteEvent(event.sourceId, event.calendarId, event.id);
+      onClose();
+    } catch (e) {
+      setActionError(String(e));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  if (editing) {
+    return <EventModal mode={{ kind: "edit", event }} onClose={onClose} />;
+  }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -94,6 +131,29 @@ export function EventDetailsModal({
           <Row label="イベント ID">
             <code className="event-id">{event.id}</code>
           </Row>
+
+          {actionError && <div className="event-form-error">{actionError}</div>}
+
+          <div className="event-details-actions">
+            {writeBlockReason && (
+              <span className="hint warn">{writeBlockReason}</span>
+            )}
+            <button
+              type="button"
+              className="danger"
+              disabled={!isWritable || deleting}
+              onClick={handleDelete}
+            >
+              {deleting ? "削除中…" : "削除"}
+            </button>
+            <button
+              type="button"
+              disabled={!isWritable}
+              onClick={() => setEditing(true)}
+            >
+              編集
+            </button>
+          </div>
         </div>
       </div>
     </div>

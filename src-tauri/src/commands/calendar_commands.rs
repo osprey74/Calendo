@@ -90,15 +90,19 @@ fn is_recoverable_per_calendar(e: &AppError) -> bool {
 }
 
 #[tauri::command]
-#[allow(unused_variables)]
 pub async fn event_create(
     source_id: String,
     calendar_id: String,
     draft: EventDraft,
 ) -> AppResult<UnifiedEvent> {
-    Err(AppError::Other("event_create not yet implemented (Phase 3)".into()))
+    let id = parse_source(&source_id)?;
+    calendars::create_event(id, &calendar_id, &draft).await
 }
 
+/// Update an existing event. The recurring-scope dialog (this-only / this-and-following /
+/// all) is deferred to Phase 4 — for now `recurring_scope` is accepted but ignored, and
+/// updates always target the event identified by `event_id` (which on Graph/GCal is the
+/// API's per-instance id, on CalDAV the .ics resource URL of the master VEVENT).
 #[tauri::command]
 #[allow(unused_variables)]
 pub async fn event_update(
@@ -106,15 +110,20 @@ pub async fn event_update(
     event_id: String,
     request: EventUpdateRequest,
 ) -> AppResult<UnifiedEvent> {
-    Err(AppError::Other("event_update not yet implemented (Phase 3)".into()))
+    let id = parse_source(&source_id)?;
+    calendars::update_event(id, &request.draft.calendar_id, &event_id, &request.draft).await
 }
 
+/// Delete an event. As with `event_update`, recurring-scope routing is Phase 4 — current
+/// behaviour deletes the event/resource identified by `event_id` directly.
 #[tauri::command]
 #[allow(unused_variables)]
 pub async fn event_delete(
     source_id: String,
+    calendar_id: String,
     event_id: String,
     recurring_scope: Option<RecurringEditScope>,
 ) -> AppResult<()> {
-    Err(AppError::Other("event_delete not yet implemented (Phase 3)".into()))
+    let id = parse_source(&source_id)?;
+    calendars::delete_event(id, &calendar_id, &event_id).await
 }

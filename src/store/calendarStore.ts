@@ -3,11 +3,18 @@ import type {
   CalendarMeta,
   CalendarSourceId,
   CalendarView,
+  EventDraft,
   UnifiedEvent,
 } from "../types";
 import { DEFAULT_SOURCES } from "../types";
 import { addDays, startOfWeekJst, ymd } from "../utils/dateUtils";
-import { calendarsFetch, eventsFetch } from "../lib/tauri";
+import {
+  calendarsFetch,
+  eventCreate,
+  eventDelete,
+  eventUpdate,
+  eventsFetch,
+} from "../lib/tauri";
 
 type RecordBy<T extends string, V> = Record<T, V>;
 
@@ -46,6 +53,10 @@ type Actions = {
   loadCalendars: (sourceId: CalendarSourceId) => Promise<void>;
   loadEvents: () => Promise<void>;
   invalidate: () => void;
+
+  createEvent: (draft: EventDraft) => Promise<UnifiedEvent>;
+  updateEvent: (eventId: string, draft: EventDraft) => Promise<UnifiedEvent>;
+  deleteEvent: (sourceId: CalendarSourceId, calendarId: string, eventId: string) => Promise<void>;
 };
 
 export type CalendarStore = State & Actions;
@@ -218,6 +229,26 @@ export const useCalendarStore = create<CalendarStore>((set, get) => ({
 
   invalidate: () => {
     set({ events: [], loadedRange: null });
+  },
+
+  createEvent: async (draft) => {
+    const created = await eventCreate(draft.sourceId, draft.calendarId, draft);
+    // Refresh the current visible window so recurring expansions / server-side adjustments
+    // (e.g., Graph rounding fractional seconds) are picked up rather than relying on the
+    // optimistic local insert.
+    await get().loadEvents();
+    return created;
+  },
+
+  updateEvent: async (eventId, draft) => {
+    const updated = await eventUpdate(draft.sourceId, eventId, { draft });
+    await get().loadEvents();
+    return updated;
+  },
+
+  deleteEvent: async (sourceId, calendarId, eventId) => {
+    await eventDelete(sourceId, calendarId, eventId);
+    await get().loadEvents();
   },
 }));
 

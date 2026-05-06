@@ -2,7 +2,7 @@
 
 **最終更新**: 2026-05-06
 **バージョン**: v0.1.0（開発中）
-**フェーズ**: Phase 2（イベント取得・表示）— 3 ソース横断のカレンダー一覧／イベント取得・日次/週次 UI 実装完了、実機動作確認待ち
+**フェーズ**: Phase 3.0（イベント作成・編集・削除）— 全 3 ソースで CRUD 実装完了、実機動作確認待ち。繰り返しスコープ別編集は Phase 4 に先送り
 
 ---
 
@@ -199,22 +199,32 @@ gh secret set GOOGLE_CLIENT_SECRET --repo osprey74/Calendo
 
 ### Phase 3：イベント作成・編集・削除
 
-- [ ] EventModal UI（タイトル・日時・終日・場所・メモ・登録先カレンダー2段階選択）
-- [ ] バリデーション（タイトル必須・終了 ≥ 開始）
+#### Phase 3.0：基本 CRUD（実装済み）
+
+- [x] EventModal UI（タイトル・日時・終日・場所・メモ・登録先カレンダー2段階選択）
+- [x] バリデーション（タイトル必須・終了 > 開始・書き込み可能なカレンダー必須）
+- [x] Graph 書き込み実装（`POST /me/calendars/{id}/events` / `PATCH /me/events/{id}` / `DELETE /me/events/{id}`、`Prefer: outlook.timezone="UTC"` 付き）
+- [x] Google Calendar 書き込み実装（`POST/PATCH/DELETE /calendars/{calendarId}/events[/{eventId}]`、`sendUpdates=none` 付き）
+- [x] CalDAV 書き込み実装（VEVENT 生成・`PUT` で create（`If-None-Match: *`）、existing UID 保持で update、`DELETE` で削除）
+- [x] イベント詳細モーダルから「編集」「削除」ボタンで起動。新規は TopBar の `+ 新規` ボタンから
+- [x] 全イベント書き込みパスで作成/更新後に `loadEvents()` を呼んで現在表示窓を再フェッチ
+
+#### Phase 3.0 実装メモ
+
+- **DTEND 変換**: フォーム入力は inclusive（ユーザーが指定した最終日）。バックエンドが各 provider の API に投げる時に exclusive（次日）へ変換（`Graph` / `GCal` `date` フィールド / CalDAV `DTEND;VALUE=DATE`）
+- **タイムゾーン**: 終日以外は JST RFC3339（`+09:00`）を生成。Graph では `timeZone: "Asia/Tokyo"` パラメータ + 19文字の naive datetime に変換。GCal はそのまま渡す。CalDAV は UTC（`Z` 付き）に変換して `VTIMEZONE` ブロックを省略
+- **CalDAV id の意味変更**: 以前は iCalendar UID ベースだったが、Phase 3 では **`.ics` リソース URL** をカノニカル ID に。展開済み繰り返しインスタンスは `<resource_url>::<recurrence_id>` で discriminate（READ 時に注意）。書き込み系は常に URL 部分だけを使う
+- **CalDAV 更新の UID 保持**: PUT する前に GET で既存 .ics を読み、`UID:` 行を抽出して同じ UID で書き戻す（UID 変更すると iCloud がイベント重複を作る恐れがあるため）。GET 失敗時は新 UID 発行→新規作成扱いにフォールバック
+- **書き込み可否ガード**: 詳細モーダルの編集/削除ボタンは `calendar.isWritable` が真かつ「iCloud かつ繰り返し」でない場合のみ有効。書き込み不可の理由をボタン横にヒント表示
+- **EventModal 編集モード**: ソース／カレンダーは固定（移動は未対応 — 削除＋再作成で対応）
+
+#### Phase 4 に先送り
+
 - [ ] 繰り返しイベント編集ダイアログ（「この1件のみ」「以降すべて」「すべて」）
-- [ ] Graph 書き込み実装
-  - 新規: `POST /me/calendars/{id}/events`
-  - 更新: `PATCH /me/events/{id}`（`thisAndFollowing` / `singleInstance` / `master`）
-  - 削除: `DELETE /me/events/{id}`
-- [ ] Google Calendar 書き込み実装
-  - 新規: `POST /calendars/{calendarId}/events`
-  - 更新: `PATCH /calendars/{calendarId}/events/{eventId}`（`recurringEventId` 連動）
-  - 削除: `DELETE` + `sendUpdates=none`
-- [ ] CalDAV 書き込み実装
-  - 新規: VEVENT を含む `.ics` を `PUT`
-  - 更新: `RECURRENCE-ID` 付き VEVENT で部分上書き or `EXDATE` 追記
-  - 削除: `DELETE` or `EXDATE`
-- [ ] 繰り返し編集スコープ別の API 呼び出し分岐ロジック
+- [ ] Graph 繰り返しスコープ別の API 呼び出し分岐（`thisAndFollowing` / `singleInstance` / `master`）
+- [ ] Google Calendar 繰り返し系（`recurringEventId` 連動）
+- [ ] CalDAV 繰り返し: `RECURRENCE-ID` 付き VEVENT 部分上書き、`EXDATE` 追記による単一インスタンス削除
+- [ ] イベントのソース／カレンダー間移動（現状: 削除＋再作成）
 
 ### Phase 4：設定・仕上げ
 

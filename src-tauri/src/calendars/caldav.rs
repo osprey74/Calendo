@@ -2,8 +2,9 @@ use crate::auth::keyring::{load_icloud, ICloudCredentials};
 use crate::calendars::ical::{parse_vevents, ICalDateTime, VEvent};
 use crate::calendars::xmlnode::XmlNode;
 use crate::error::{AppError, AppResult};
-use crate::models::{CalendarMeta, CalendarSourceId, UnifiedEvent};
-use chrono::NaiveDate;
+use crate::models::{CalendarSourceId, CalendarMeta, EventDraft, UnifiedEvent};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use rand::RngCore;
 use reqwest::Method;
 use url::Url;
 
@@ -291,10 +292,14 @@ pub async fn fetch_events(
             continue;
         }
 
-        let resource_href = resp
+        let raw_href = resp
             .find("href")
             .map(|n| n.text.trim().to_string())
             .unwrap_or_default();
+        // Resolve the href against the calendar URL so the resulting id is a full URL
+        // we can later PUT/DELETE against. iCloud REPORT returns absolute paths
+        // (e.g. `/12345/calendars/abc/uuid.ics`) without the host.
+        let resource_href = resolve_href(calendar_id, &raw_href).unwrap_or(raw_href);
 
         for ve in parse_vevents(raw) {
             if let Some(unified) = vevent_to_unified(source_id, calendar_id, &resource_href, ve) {
@@ -326,16 +331,12 @@ fn vevent_to_unified(
     let start = dtstart.to_iso_jst();
     let end = dtend.to_iso_jst();
 
-    // Use UID + RECURRENCE-ID (if any) so expanded instances get unique IDs.
+    // Use the .ics resource URL as the canonical id so write commands (PUT/DELETE) can
+    // target it directly. Expanded recurring instances share the same resource URL, so
+    // append a `::<recurrence-id>` discriminator to keep them distinct in the UI store.
     let id = match &ve.recurrence_id {
-        Some(rid) => format!("{}::{}", ve.uid, rid_key(rid)),
-        None => {
-            if !ve.uid.is_empty() {
-                ve.uid.clone()
-            } else {
-                resource_href.to_string()
-            }
-        }
+        Some(rid) => format!("{}::{}", resource_href, rid_key(rid)),
+        None => resource_href.to_string(),
     };
 
     Some(UnifiedEvent {
@@ -361,3 +362,277 @@ fn rid_key(d: &ICalDateTime) -> String {
         ICalDateTime::DateTimeLocal { naive, .. } => naive.format("%Y%m%dT%H%M%S").to_string(),
     }
 }
+
+// --- Write operations -------------------------------------------------------
+
+/// Strip the optional `::recurrence-id` discriminator we append to recurring instance ids.
+/// Write operations always target the underlying .ics resource URL.
+fn caldav_resource_url(event_id: &str) -> &str {
+    event_id.split("::").next().unwrap_or(event_id)
+}
+
+fn generate_uid() -> String {
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let mut hex = String::with_capacity(32);
+    for b in &bytes {
+        hex.push_str(&format!("{:02x}", b));
+    }
+    format!("{}@calendo", hex)
+}
+
+fn ical_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace(',', "\\,")
+        .replace(';', "\\;")
+}
+
+/// Convert a JST ISO 8601 string ("2026-05-15T10:00:00+09:00") to UTC iCalendar
+/// form ("20260515T010000Z"). UTC is preferred over TZID so we don't need to emit
+/// a VTIMEZONE block alongside every event.
+fn jst_iso_to_ical_utc(iso: &str) -> AppResult<String> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(iso) {
+        return Ok(dt.with_timezone(&Utc).format("%Y%m%dT%H%M%SZ").to_string());
+    }
+    // Fallback: naive datetime is assumed to be JST (matches our store convention).
+    let naive = if iso.len() >= 19 { &iso[..19] } else { iso };
+    let n = NaiveDateTime::parse_from_str(naive, "%Y-%m-%dT%H:%M:%S")
+        .map_err(|e| AppError::Other(format!("invalid datetime {iso}: {e}")))?;
+    let jst = FixedOffset::east_opt(9 * 3600).unwrap();
+    let dt = jst
+        .from_local_datetime(&n)
+        .single()
+        .ok_or_else(|| AppError::Other(format!("ambiguous local time {iso}")))?;
+    Ok(dt.with_timezone(&Utc).format("%Y%m%dT%H%M%SZ").to_string())
+}
+
+/// Convert an inclusive YYYY-MM-DD all-day end into the exclusive iCalendar/RFC 5545
+/// form (next day in YYYYMMDD). Drafts use inclusive ends so the form layer matches
+/// what the user typed; iCalendar / Graph / GCal all expect exclusive ends on the wire.
+fn inclusive_end_to_ical_date(date: &str) -> AppResult<String> {
+    let d = NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map_err(|e| AppError::Other(format!("invalid date {date}: {e}")))?;
+    let next = d
+        .succ_opt()
+        .ok_or_else(|| AppError::Other(format!("date overflow at {date}")))?;
+    Ok(next.format("%Y%m%d").to_string())
+}
+
+fn build_vcalendar(uid: &str, draft: &EventDraft, sequence: u32) -> AppResult<String> {
+    let dtstamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    let mut out = String::new();
+    out.push_str("BEGIN:VCALENDAR\r\n");
+    out.push_str("VERSION:2.0\r\n");
+    out.push_str("PRODID:-//Calendo//Calendo 0.1//EN\r\n");
+    out.push_str("CALSCALE:GREGORIAN\r\n");
+    out.push_str("BEGIN:VEVENT\r\n");
+    out.push_str(&format!("UID:{}\r\n", uid));
+    out.push_str(&format!("DTSTAMP:{}\r\n", dtstamp));
+    out.push_str(&format!("SEQUENCE:{}\r\n", sequence));
+    out.push_str(&format!("SUMMARY:{}\r\n", ical_escape(&draft.title)));
+
+    if draft.is_all_day {
+        let start = NaiveDate::parse_from_str(&draft.start, "%Y-%m-%d")
+            .map_err(|e| AppError::Other(format!("invalid date {}: {e}", draft.start)))?;
+        let end_exc = inclusive_end_to_ical_date(&draft.end)?;
+        out.push_str(&format!(
+            "DTSTART;VALUE=DATE:{}\r\n",
+            start.format("%Y%m%d")
+        ));
+        out.push_str(&format!("DTEND;VALUE=DATE:{}\r\n", end_exc));
+    } else {
+        let start_utc = jst_iso_to_ical_utc(&draft.start)?;
+        let end_utc = jst_iso_to_ical_utc(&draft.end)?;
+        out.push_str(&format!("DTSTART:{}\r\n", start_utc));
+        out.push_str(&format!("DTEND:{}\r\n", end_utc));
+    }
+
+    if let Some(loc) = &draft.location {
+        if !loc.is_empty() {
+            out.push_str(&format!("LOCATION:{}\r\n", ical_escape(loc)));
+        }
+    }
+    if let Some(body) = &draft.body {
+        if !body.is_empty() {
+            out.push_str(&format!("DESCRIPTION:{}\r\n", ical_escape(body)));
+        }
+    }
+
+    out.push_str("END:VEVENT\r\n");
+    out.push_str("END:VCALENDAR\r\n");
+    Ok(out)
+}
+
+async fn put_ics(creds: &ICloudCredentials, url: &str, ics: &str, expect_new: bool) -> AppResult<()> {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()?;
+    let mut req = client
+        .put(url)
+        .basic_auth(&creds.apple_id, Some(&creds.app_password))
+        .header("Content-Type", "text/calendar; charset=utf-8")
+        .body(ics.to_string());
+    if expect_new {
+        // If-None-Match: * makes PUT atomic-create — server rejects if a resource already
+        // exists at that URL, so a UID collision can't accidentally overwrite something.
+        req = req.header("If-None-Match", "*");
+    }
+    let resp = req.send().await?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::CalDav(format!(
+            "PUT {url} → {status}: {}",
+            truncate(&text, 300)
+        )));
+    }
+    Ok(())
+}
+
+async fn fetch_existing_ics(creds: &ICloudCredentials, url: &str) -> AppResult<String> {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()?;
+    let resp = client
+        .get(url)
+        .basic_auth(&creds.apple_id, Some(&creds.app_password))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Err(AppError::CalDav(format!(
+            "GET {url} → {} (cannot read existing event for update)",
+            resp.status()
+        )));
+    }
+    Ok(resp.text().await?)
+}
+
+fn extract_uid(ics: &str) -> Option<String> {
+    for line in ics.lines() {
+        if let Some(rest) = line.strip_prefix("UID:") {
+            return Some(rest.trim().to_string());
+        }
+    }
+    None
+}
+
+pub async fn create_event(
+    source_id: CalendarSourceId,
+    calendar_id: &str,
+    draft: &EventDraft,
+) -> AppResult<UnifiedEvent> {
+    let creds = load_icloud()?
+        .ok_or_else(|| AppError::NotAuthenticated(source_id.as_str().into()))?;
+
+    let uid = generate_uid();
+    let resource_url = format!(
+        "{}/{}.ics",
+        calendar_id.trim_end_matches('/'),
+        urlencoded_filename(&uid)
+    );
+    let ics = build_vcalendar(&uid, draft, 0)?;
+    put_ics(&creds, &resource_url, &ics, true).await?;
+
+    Ok(unified_from_draft(source_id, calendar_id, &resource_url, draft))
+}
+
+pub async fn update_event(
+    source_id: CalendarSourceId,
+    event_id: &str,
+    draft: &EventDraft,
+) -> AppResult<UnifiedEvent> {
+    let creds = load_icloud()?
+        .ok_or_else(|| AppError::NotAuthenticated(source_id.as_str().into()))?;
+
+    let resource_url = caldav_resource_url(event_id).to_string();
+
+    // Re-use the existing UID so the server treats this as an update of the same event
+    // rather than a new event sharing a URL. If the GET fails (e.g., the resource was
+    // already deleted server-side) generate a fresh UID and PUT as a create.
+    let existing = fetch_existing_ics(&creds, &resource_url).await.ok();
+    let uid = existing
+        .as_deref()
+        .and_then(extract_uid)
+        .unwrap_or_else(generate_uid);
+
+    let ics = build_vcalendar(&uid, draft, 1)?;
+    put_ics(&creds, &resource_url, &ics, false).await?;
+
+    Ok(unified_from_draft(
+        source_id,
+        &draft.calendar_id,
+        &resource_url,
+        draft,
+    ))
+}
+
+pub async fn delete_event(source_id: CalendarSourceId, event_id: &str) -> AppResult<()> {
+    let creds = load_icloud()?
+        .ok_or_else(|| AppError::NotAuthenticated(source_id.as_str().into()))?;
+
+    let resource_url = caldav_resource_url(event_id);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()?;
+    let resp = client
+        .delete(resource_url)
+        .basic_auth(&creds.apple_id, Some(&creds.app_password))
+        .send()
+        .await?;
+
+    let status = resp.status();
+    // 404 is acceptable for delete (someone else removed it; goal achieved).
+    if !status.is_success() && status.as_u16() != 404 {
+        return Err(AppError::CalDav(format!(
+            "DELETE {resource_url} → {status}"
+        )));
+    }
+    Ok(())
+}
+
+fn urlencoded_filename(uid: &str) -> String {
+    // UID with `@` is fine inside a path segment, but encode just to be defensive about
+    // any other reserved chars iCloud might balk at.
+    crate::calendars::util::percent_encode_segment(uid)
+}
+
+/// Build a UnifiedEvent from a draft after a successful write. We keep the API contract
+/// of returning the canonical event so the frontend can splice it into the store without
+/// always reloading. End timestamps follow the read-side convention (exclusive for
+/// all-day, RFC3339 with offset for timed).
+fn unified_from_draft(
+    source_id: CalendarSourceId,
+    calendar_id: &str,
+    resource_url: &str,
+    draft: &EventDraft,
+) -> UnifiedEvent {
+    let end = if draft.is_all_day {
+        // Convert inclusive (form) → exclusive (read-side convention) so DayView/WeekView
+        // overlap checks behave consistently after a create/edit.
+        match NaiveDate::parse_from_str(&draft.end, "%Y-%m-%d") {
+            Ok(d) => d
+                .succ_opt()
+                .map(|n| n.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| draft.end.clone()),
+            Err(_) => draft.end.clone(),
+        }
+    } else {
+        draft.end.clone()
+    };
+    UnifiedEvent {
+        id: resource_url.to_string(),
+        source_id,
+        calendar_id: calendar_id.to_string(),
+        title: draft.title.clone(),
+        start: draft.start.clone(),
+        end,
+        is_all_day: draft.is_all_day,
+        location: draft.location.clone(),
+        body: draft.body.clone(),
+        is_recurring: false,
+        recurring_event_id: None,
+        recurrence_rule: None,
+    }
+}
+

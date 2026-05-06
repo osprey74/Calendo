@@ -1,0 +1,488 @@
+import { useEffect, useMemo, useState } from "react";
+import type {
+  CalendarMeta,
+  CalendarSourceId,
+  EventDraft,
+  UnifiedEvent,
+} from "../../types";
+import { DEFAULT_SOURCES } from "../../types";
+import { useCalendarStore } from "../../store/calendarStore";
+import {
+  formPartsToIso,
+  isoToFormParts,
+  ymd,
+} from "../../utils/dateUtils";
+import { allDayEndInclusive, eventStart } from "../../utils/eventUtils";
+import "./EventModal.css";
+
+type Mode =
+  | { kind: "create"; defaultDate: Date }
+  | { kind: "edit"; event: UnifiedEvent };
+
+export function EventModal({
+  mode,
+  onClose,
+}: {
+  mode: Mode;
+  onClose: () => void;
+}) {
+  const calendars = useCalendarStore((s) => s.calendars);
+  const createEvent = useCalendarStore((s) => s.createEvent);
+  const updateEvent = useCalendarStore((s) => s.updateEvent);
+
+  const initial = useMemo(() => buildInitialState(mode), [mode]);
+  const [sourceId, setSourceId] = useState<CalendarSourceId>(initial.sourceId);
+  const [calendarId, setCalendarId] = useState<string>(initial.calendarId);
+  const [title, setTitle] = useState(initial.title);
+  const [isAllDay, setIsAllDay] = useState(initial.isAllDay);
+  const [startDate, setStartDate] = useState(initial.startDate);
+  const [startTime, setStartTime] = useState(initial.startTime);
+  const [endDate, setEndDate] = useState(initial.endDate);
+  const [endTime, setEndTime] = useState(initial.endTime);
+  const [location, setLocation] = useState(initial.location);
+  const [body, setBody] = useState(initial.body);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // When the user changes the source, pick a writable calendar from that source so the
+  // 2-stage selector stays in a valid state without forcing the user to re-tap it.
+  const writableCalendars = (calendars[sourceId] ?? []).filter((c) => c.isWritable);
+  useEffect(() => {
+    if (writableCalendars.length === 0) return;
+    if (!writableCalendars.some((c) => c.id === calendarId)) {
+      const primary = writableCalendars.find((c) => c.isPrimary) ?? writableCalendars[0];
+      setCalendarId(primary.id);
+    }
+  }, [sourceId, calendarId, writableCalendars]);
+
+  /** When the user picks a start date today-or-later, also nudge the end date to match
+   *  so the typical "single-day event" path doesn't require a second tap. Past dates
+   *  leave the end date alone (assumed to be intentional bookkeeping). */
+  const handleStartDateChange = (next: string) => {
+    setStartDate(next);
+    if (next && next >= ymdToday()) {
+      setEndDate(next);
+    }
+  };
+
+  /** Changing the start time pulls the end forward to start + 1h (rolling to the next
+   *  day if start is late enough that the hour spills past midnight). */
+  const handleStartTimeChange = (next: string) => {
+    setStartTime(next);
+    const shifted = shiftClock(startDate, next, 60);
+    setEndDate(shifted.date);
+    setEndTime(shifted.time);
+  };
+
+  const applyDuration = (minutes: number) => {
+    const shifted = shiftClock(startDate, startTime, minutes);
+    setEndDate(shifted.date);
+    setEndTime(shifted.time);
+  };
+
+  const validationError = (() => {
+    if (!title.trim()) return "タイトルを入力してください";
+    if (!calendarId) return "登録先のカレンダーを選択してください";
+    if (isAllDay) {
+      if (!startDate || !endDate) return "開始日と終了日を入力してください";
+      if (endDate < startDate) return "終了日は開始日以降にしてください";
+    } else {
+      if (!startDate || !startTime || !endDate || !endTime) {
+        return "開始・終了の日時を入力してください";
+      }
+      const startIso = formPartsToIso(startDate, startTime);
+      const endIso = formPartsToIso(endDate, endTime);
+      if (endIso <= startIso) return "終了は開始より後にしてください";
+    }
+    return null;
+  })();
+
+  const handleSubmit = async () => {
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const draft = buildDraft({
+        sourceId,
+        calendarId,
+        title: title.trim(),
+        isAllDay,
+        startDate,
+        startTime,
+        endDate,
+        endTime,
+        location,
+        body,
+      });
+      if (mode.kind === "create") {
+        await createEvent(draft);
+      } else {
+        await updateEvent(mode.event.id, draft);
+      }
+      onClose();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const isEdit = mode.kind === "edit";
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal event-modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <header className="modal-head">
+          <h2>{isEdit ? "イベントを編集" : "新規イベント"}</h2>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="閉じる">
+            ×
+          </button>
+        </header>
+
+        <div className="event-form">
+          <Field label="タイトル" required>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.currentTarget.value)}
+              placeholder="例：デザインレビュー"
+              autoFocus
+            />
+          </Field>
+
+          <Field label="ソース">
+            <select
+              value={sourceId}
+              onChange={(e) => setSourceId(e.currentTarget.value as CalendarSourceId)}
+              disabled={isEdit}
+              title="ソース"
+            >
+              {DEFAULT_SOURCES.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            {isEdit && (
+              <span className="hint">
+                ソース変更（移動）は未対応 · 削除＋新規作成で対応してください
+              </span>
+            )}
+          </Field>
+
+          <Field label="カレンダー">
+            <select
+              value={calendarId}
+              onChange={(e) => setCalendarId(e.currentTarget.value)}
+              disabled={isEdit}
+              title="カレンダー"
+            >
+              <CalendarOptions calendars={writableCalendars} currentId={calendarId} />
+            </select>
+            {writableCalendars.length === 0 && (
+              <span className="hint warn">
+                このソースに書き込み可能なカレンダーがありません
+              </span>
+            )}
+          </Field>
+
+          <Field label="">
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={isAllDay}
+                onChange={(e) => setIsAllDay(e.currentTarget.checked)}
+              />
+              <span>終日</span>
+            </label>
+          </Field>
+
+          <Field label="開始">
+            <div className="datetime-row">
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => handleStartDateChange(e.currentTarget.value)}
+                title="開始日"
+              />
+              {!isAllDay && (
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => handleStartTimeChange(e.currentTarget.value)}
+                  title="開始時刻"
+                />
+              )}
+            </div>
+          </Field>
+
+          <Field label="終了">
+            <div className="datetime-row">
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.currentTarget.value)}
+                title="終了日"
+              />
+              {!isAllDay && (
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.currentTarget.value)}
+                  title="終了時刻"
+                />
+              )}
+            </div>
+            {isAllDay && (
+              <span className="hint">終了日は当日を含めて指定（その日の終わりまで）</span>
+            )}
+            {!isAllDay && (
+              <div className="duration-row">
+                <span className="duration-label">所要:</span>
+                {DURATION_PRESETS.map((p) => (
+                  <button
+                    key={p.minutes}
+                    type="button"
+                    className="duration-btn"
+                    onClick={() => applyDuration(p.minutes)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </Field>
+
+          <Field label="場所">
+            <input
+              type="text"
+              value={location}
+              onChange={(e) => setLocation(e.currentTarget.value)}
+              placeholder="任意"
+            />
+          </Field>
+
+          <Field label="メモ">
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.currentTarget.value)}
+              rows={4}
+              placeholder="任意"
+            />
+          </Field>
+
+          {error && <div className="event-form-error">{error}</div>}
+
+          <div className="event-form-actions">
+            <button type="button" className="secondary" onClick={onClose} disabled={submitting}>
+              キャンセル
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitting || !!validationError}
+            >
+              {submitting ? "保存中…" : isEdit ? "更新" : "作成"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="event-field">
+      <label className="event-field-label">
+        {label}
+        {required && <span className="required-mark">*</span>}
+      </label>
+      <div className="event-field-input">{children}</div>
+    </div>
+  );
+}
+
+function CalendarOptions({
+  calendars,
+  currentId,
+}: {
+  calendars: CalendarMeta[];
+  currentId: string;
+}) {
+  if (calendars.length === 0) {
+    return <option value="">（書き込み可能なカレンダーなし）</option>;
+  }
+  if (!calendars.some((c) => c.id === currentId)) {
+    return (
+      <>
+        <option value="">選択…</option>
+        {calendars.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+            {c.isPrimary ? " (primary)" : ""}
+          </option>
+        ))}
+      </>
+    );
+  }
+  return (
+    <>
+      {calendars.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.name}
+          {c.isPrimary ? " (primary)" : ""}
+        </option>
+      ))}
+    </>
+  );
+}
+
+function buildInitialState(mode: Mode) {
+  if (mode.kind === "edit") {
+    const e = mode.event;
+    if (e.isAllDay) {
+      const start = eventStart(e);
+      // UnifiedEvent.end is exclusive for all-day; the form uses inclusive ends.
+      const inclusiveEnd = allDayEndInclusive(e);
+      return {
+        sourceId: e.sourceId,
+        calendarId: e.calendarId,
+        title: e.title,
+        isAllDay: true,
+        startDate: ymd(start),
+        startTime: "00:00",
+        endDate: ymd(inclusiveEnd),
+        endTime: "00:00",
+        location: e.location ?? "",
+        body: e.body ?? "",
+      };
+    }
+    const startParts = isoToFormParts(e.start);
+    const endParts = isoToFormParts(e.end);
+    return {
+      sourceId: e.sourceId,
+      calendarId: e.calendarId,
+      title: e.title,
+      isAllDay: false,
+      startDate: startParts.date,
+      startTime: startParts.time,
+      endDate: endParts.date,
+      endTime: endParts.time,
+      location: e.location ?? "",
+      body: e.body ?? "",
+    };
+  }
+  // Create mode: anchor on the current view date with a 1-hour default block.
+  const date = ymd(mode.defaultDate);
+  return {
+    sourceId: "ms365_work1" as CalendarSourceId,
+    calendarId: "",
+    title: "",
+    isAllDay: false,
+    startDate: date,
+    startTime: "10:00",
+    endDate: date,
+    endTime: "11:00",
+    location: "",
+    body: "",
+  };
+}
+
+const DURATION_PRESETS: { label: string; minutes: number }[] = [
+  { label: "10分", minutes: 10 },
+  { label: "15分", minutes: 15 },
+  { label: "30分", minutes: 30 },
+  { label: "1時間", minutes: 60 },
+  { label: "90分", minutes: 90 },
+  { label: "2時間", minutes: 120 },
+  { label: "3時間", minutes: 180 },
+];
+
+function ymdToday(): string {
+  return ymd(new Date());
+}
+
+/** Add `n` calendar days to a YYYY-MM-DD string using local date arithmetic so JST
+ *  day boundaries are respected (no timezone shift via UTC parsing). */
+function addDaysToYmd(date: string, n: number): string {
+  const [y, m, d] = date.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + n);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+/** Shift a (date, time) pair forward by `minutes`. Rolls into following calendar days as
+ *  needed; 23:30 + 90min returns the next day at 01:00. */
+function shiftClock(
+  date: string,
+  time: string,
+  minutes: number,
+): { date: string; time: string } {
+  const [h, m] = time.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m) || !date) {
+    return { date, time };
+  }
+  let total = h * 60 + m + minutes;
+  let dayOffset = 0;
+  while (total >= 24 * 60) {
+    total -= 24 * 60;
+    dayOffset += 1;
+  }
+  while (total < 0) {
+    total += 24 * 60;
+    dayOffset -= 1;
+  }
+  const eh = Math.floor(total / 60);
+  const em = total % 60;
+  return {
+    date: dayOffset === 0 ? date : addDaysToYmd(date, dayOffset),
+    time: `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`,
+  };
+}
+
+function buildDraft(args: {
+  sourceId: CalendarSourceId;
+  calendarId: string;
+  title: string;
+  isAllDay: boolean;
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+  location: string;
+  body: string;
+}): EventDraft {
+  const { sourceId, calendarId, title, isAllDay, startDate, endDate } = args;
+  const start = isAllDay ? startDate : formPartsToIso(startDate, args.startTime);
+  const end = isAllDay ? endDate : formPartsToIso(endDate, args.endTime);
+  return {
+    sourceId,
+    calendarId,
+    title,
+    start,
+    end,
+    isAllDay,
+    location: args.location.trim() || undefined,
+    body: args.body.trim() || undefined,
+  };
+}

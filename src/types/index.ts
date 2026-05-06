@@ -55,3 +55,22 @@ export const DEFAULT_SOURCES: SourceDescriptor[] = [
 ];
 
 export type CalendarView = "day" | "week";
+
+export type EventDraft = {
+  sourceId: CalendarSourceId;
+  calendarId: string;
+  title: string;
+  /** ISO 8601 in JST. For all-day events, `YYYY-MM-DD` with INCLUSIVE end (form convention). */
+  start: string;
+  end: string;
+  isAllDay: boolean;
+  location?: string;
+  body?: string;
+};
+
+export type RecurringEditScope = "this" | "this_and_following" | "all";
+
+export type EventUpdateRequest = {
+  draft: EventDraft;
+  recurringScope?: RecurringEditScope;
+};

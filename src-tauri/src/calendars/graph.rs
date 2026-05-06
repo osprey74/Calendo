@@ -1,10 +1,11 @@
 use crate::auth::oauth::ensure_fresh;
 use crate::calendars::util::percent_encode_segment;
-use crate::error::AppResult;
-use crate::models::{CalendarMeta, CalendarSourceId, UnifiedEvent};
-use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
+use crate::error::{AppError, AppResult};
+use crate::models::{CalendarMeta, CalendarSourceId, EventDraft, UnifiedEvent};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::Deserialize;
+use serde_json::{json, Value as JsonValue};
 
 const GRAPH_BASE: &str = "https://graph.microsoft.com/v1.0";
 const JST_OFFSET_SECS: i32 = 9 * 3600;
@@ -237,4 +238,144 @@ fn strip_html(s: String) -> String {
 /// the UI palette handler is responsible for mapping or falling back to source default.
 fn graph_color(c: Option<String>) -> Option<String> {
     c.filter(|s| !s.is_empty() && s != "auto")
+}
+
+// --- Write operations -------------------------------------------------------
+
+/// Build the JSON payload for `POST /me/calendars/{id}/events` and `PATCH /me/events/{id}`.
+/// Both endpoints accept the same shape, so the same builder serves create and update.
+fn build_event_payload(draft: &EventDraft) -> AppResult<JsonValue> {
+    let (start, end) = build_datetime_pair(draft)?;
+    let mut obj = json!({
+        "subject": draft.title,
+        "start": start,
+        "end": end,
+        "isAllDay": draft.is_all_day,
+    });
+    if let Some(loc) = &draft.location {
+        if !loc.is_empty() {
+            obj["location"] = json!({ "displayName": loc });
+        }
+    }
+    if let Some(body) = &draft.body {
+        if !body.is_empty() {
+            obj["body"] = json!({ "contentType": "text", "content": body });
+        }
+    }
+    Ok(obj)
+}
+
+fn build_datetime_pair(draft: &EventDraft) -> AppResult<(JsonValue, JsonValue)> {
+    if draft.is_all_day {
+        // Graph requires UTC midnight + isAllDay=true. Draft's `end` is inclusive (form
+        // convention); convert to exclusive by adding one day.
+        let start_date = NaiveDate::parse_from_str(&draft.start, "%Y-%m-%d")
+            .map_err(|e| AppError::Other(format!("invalid date {}: {e}", draft.start)))?;
+        let end_inc = NaiveDate::parse_from_str(&draft.end, "%Y-%m-%d")
+            .map_err(|e| AppError::Other(format!("invalid date {}: {e}", draft.end)))?;
+        let end_exc = end_inc
+            .succ_opt()
+            .ok_or_else(|| AppError::Other(format!("date overflow at {}", draft.end)))?;
+        Ok((
+            json!({
+                "dateTime": format!("{}T00:00:00", start_date.format("%Y-%m-%d")),
+                "timeZone": "UTC",
+            }),
+            json!({
+                "dateTime": format!("{}T00:00:00", end_exc.format("%Y-%m-%d")),
+                "timeZone": "UTC",
+            }),
+        ))
+    } else {
+        // Drafts arrive as JST RFC3339 (`...+09:00`). Strip the offset and tag the value
+        // with `timeZone: "Asia/Tokyo"` — Graph accepts naive datetimes paired with TZ.
+        Ok((
+            json!({
+                "dateTime": strip_offset(&draft.start),
+                "timeZone": "Asia/Tokyo",
+            }),
+            json!({
+                "dateTime": strip_offset(&draft.end),
+                "timeZone": "Asia/Tokyo",
+            }),
+        ))
+    }
+}
+
+fn strip_offset(iso: &str) -> String {
+    // "2026-05-15T10:00:00+09:00" or "...Z" → "2026-05-15T10:00:00".
+    if iso.len() >= 19 {
+        iso[..19].to_string()
+    } else {
+        iso.to_string()
+    }
+}
+
+pub async fn create_event(
+    source_id: CalendarSourceId,
+    calendar_id: &str,
+    draft: &EventDraft,
+) -> AppResult<UnifiedEvent> {
+    let tokens = ensure_fresh(source_id).await?;
+    let calendar_seg = percent_encode_segment(calendar_id);
+    let url = format!("{GRAPH_BASE}/me/calendars/{calendar_seg}/events");
+    let payload = build_event_payload(draft)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .bearer_auth(&tokens.access_token)
+        .header("Prefer", r#"outlook.timezone="UTC""#)
+        .json(&payload)
+        .send()
+        .await?
+        .error_for_status()?;
+    let event: GraphEvent = resp.json().await?;
+    graph_event_to_unified(source_id, calendar_id, event)
+        .ok_or_else(|| AppError::Other("Graph create returned event with invalid datetimes".into()))
+}
+
+pub async fn update_event(
+    source_id: CalendarSourceId,
+    event_id: &str,
+    draft: &EventDraft,
+) -> AppResult<UnifiedEvent> {
+    let tokens = ensure_fresh(source_id).await?;
+    let event_seg = percent_encode_segment(event_id);
+    // /me/events/{id} edits any event the user owns regardless of which calendar it's in,
+    // so we don't need calendar_id in the URL — but we still want the response to carry
+    // the calendar_id forward in the UnifiedEvent so the UI keeps it grouped correctly.
+    let url = format!("{GRAPH_BASE}/me/events/{event_seg}");
+    let payload = build_event_payload(draft)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .patch(&url)
+        .bearer_auth(&tokens.access_token)
+        .header("Prefer", r#"outlook.timezone="UTC""#)
+        .json(&payload)
+        .send()
+        .await?
+        .error_for_status()?;
+    let event: GraphEvent = resp.json().await?;
+    graph_event_to_unified(source_id, &draft.calendar_id, event)
+        .ok_or_else(|| AppError::Other("Graph update returned event with invalid datetimes".into()))
+}
+
+pub async fn delete_event(source_id: CalendarSourceId, event_id: &str) -> AppResult<()> {
+    let tokens = ensure_fresh(source_id).await?;
+    let event_seg = percent_encode_segment(event_id);
+    let url = format!("{GRAPH_BASE}/me/events/{event_seg}");
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(&url)
+        .bearer_auth(&tokens.access_token)
+        .send()
+        .await?;
+    let status = resp.status();
+    if !status.is_success() && status.as_u16() != 404 {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!(
+            "Graph DELETE {url} → {status}: {text}"
+        )));
+    }
+    Ok(())
 }

@@ -1,9 +1,10 @@
 use crate::auth::oauth::ensure_fresh;
 use crate::calendars::util::percent_encode_segment;
-use crate::error::AppResult;
-use crate::models::{CalendarMeta, CalendarSourceId, UnifiedEvent};
+use crate::error::{AppError, AppResult};
+use crate::models::{CalendarMeta, CalendarSourceId, EventDraft, UnifiedEvent};
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use serde::Deserialize;
+use serde_json::{json, Value as JsonValue};
 
 const GCAL_BASE: &str = "https://www.googleapis.com/calendar/v3";
 const JST_OFFSET_SECS: i32 = 9 * 3600;
@@ -178,5 +179,118 @@ fn parse_gcal_datetime(dt: &GCalEventDateTime) -> Option<(String, bool)> {
     let jst = FixedOffset::east_opt(JST_OFFSET_SECS).unwrap();
     let in_jst = parsed.with_timezone(&jst);
     Some((in_jst.format("%Y-%m-%dT%H:%M:%S%:z").to_string(), false))
+}
+
+// --- Write operations -------------------------------------------------------
+
+fn build_event_payload(draft: &EventDraft) -> AppResult<JsonValue> {
+    let mut obj = json!({
+        "summary": draft.title,
+    });
+    if let Some(loc) = &draft.location {
+        if !loc.is_empty() {
+            obj["location"] = json!(loc);
+        }
+    }
+    if let Some(body) = &draft.body {
+        if !body.is_empty() {
+            obj["description"] = json!(body);
+        }
+    }
+    if draft.is_all_day {
+        // Google all-day uses {date: "YYYY-MM-DD"} with EXCLUSIVE end. Drafts use inclusive
+        // end (form convention) so we add one day.
+        let _ = NaiveDate::parse_from_str(&draft.start, "%Y-%m-%d")
+            .map_err(|e| AppError::Other(format!("invalid date {}: {e}", draft.start)))?;
+        let end_inc = NaiveDate::parse_from_str(&draft.end, "%Y-%m-%d")
+            .map_err(|e| AppError::Other(format!("invalid date {}: {e}", draft.end)))?;
+        let end_exc = end_inc
+            .succ_opt()
+            .ok_or_else(|| AppError::Other(format!("date overflow at {}", draft.end)))?
+            .format("%Y-%m-%d")
+            .to_string();
+        obj["start"] = json!({ "date": draft.start });
+        obj["end"] = json!({ "date": end_exc });
+    } else {
+        // Drafts already carry RFC3339 with `+09:00`, which Google accepts directly.
+        obj["start"] = json!({ "dateTime": draft.start, "timeZone": "Asia/Tokyo" });
+        obj["end"] = json!({ "dateTime": draft.end, "timeZone": "Asia/Tokyo" });
+    }
+    Ok(obj)
+}
+
+pub async fn create_event(
+    source_id: CalendarSourceId,
+    calendar_id: &str,
+    draft: &EventDraft,
+) -> AppResult<UnifiedEvent> {
+    let tokens = ensure_fresh(source_id).await?;
+    let calendar_seg = percent_encode_segment(calendar_id);
+    let url = format!("{GCAL_BASE}/calendars/{calendar_seg}/events");
+    let payload = build_event_payload(draft)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .bearer_auth(&tokens.access_token)
+        .json(&payload)
+        .send()
+        .await?
+        .error_for_status()?;
+    let event: GCalEvent = resp.json().await?;
+    gcal_event_to_unified(source_id, calendar_id, event)
+        .ok_or_else(|| AppError::Other("GCal create returned event with invalid datetimes".into()))
+}
+
+pub async fn update_event(
+    source_id: CalendarSourceId,
+    calendar_id: &str,
+    event_id: &str,
+    draft: &EventDraft,
+) -> AppResult<UnifiedEvent> {
+    let tokens = ensure_fresh(source_id).await?;
+    let calendar_seg = percent_encode_segment(calendar_id);
+    let event_seg = percent_encode_segment(event_id);
+    let url = format!("{GCAL_BASE}/calendars/{calendar_seg}/events/{event_seg}");
+    let payload = build_event_payload(draft)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .patch(&url)
+        .bearer_auth(&tokens.access_token)
+        .json(&payload)
+        .send()
+        .await?
+        .error_for_status()?;
+    let event: GCalEvent = resp.json().await?;
+    gcal_event_to_unified(source_id, calendar_id, event)
+        .ok_or_else(|| AppError::Other("GCal update returned event with invalid datetimes".into()))
+}
+
+pub async fn delete_event(
+    source_id: CalendarSourceId,
+    calendar_id: &str,
+    event_id: &str,
+) -> AppResult<()> {
+    let tokens = ensure_fresh(source_id).await?;
+    let calendar_seg = percent_encode_segment(calendar_id);
+    let event_seg = percent_encode_segment(event_id);
+    // sendUpdates=none avoids notifying attendees of cancellations the user is just
+    // removing locally; the Phase 4 SettingsModal can expose this as a preference later.
+    let url = format!(
+        "{GCAL_BASE}/calendars/{calendar_seg}/events/{event_seg}?sendUpdates=none"
+    );
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(&url)
+        .bearer_auth(&tokens.access_token)
+        .send()
+        .await?;
+    let status = resp.status();
+    if !status.is_success() && status.as_u16() != 404 && status.as_u16() != 410 {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!(
+            "GCal DELETE {url} → {status}: {text}"
+        )));
+    }
+    Ok(())
 }
 

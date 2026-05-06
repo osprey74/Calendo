@@ -4,6 +4,8 @@ import type {
   CalendarMeta,
   CalendarSourceId,
   ClientDebugInfo,
+  EventDraft,
+  EventUpdateRequest,
   UnifiedEvent,
 } from "../types";
 
@@ -40,3 +42,27 @@ export const eventsFetch = (
   });
 
 export const authDebugClients = () => invoke<ClientDebugInfo>("auth_debug_clients");
+
+export const eventCreate = (
+  sourceId: CalendarSourceId,
+  calendarId: string,
+  draft: EventDraft,
+) => invoke<UnifiedEvent>("event_create", { sourceId, calendarId, draft });
+
+export const eventUpdate = (
+  sourceId: CalendarSourceId,
+  eventId: string,
+  request: EventUpdateRequest,
+) => invoke<UnifiedEvent>("event_update", { sourceId, eventId, request });
+
+export const eventDelete = (
+  sourceId: CalendarSourceId,
+  calendarId: string,
+  eventId: string,
+) =>
+  invoke<void>("event_delete", {
+    sourceId,
+    calendarId,
+    eventId,
+    recurringScope: null,
+  });

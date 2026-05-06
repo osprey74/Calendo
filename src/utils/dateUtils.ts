@@ -80,6 +80,22 @@ export function minutesSinceMidnight(date: Date, dayAnchor: Date): number {
   return Math.max(0, Math.min(1440, minutes));
 }
 
+/** "2026-05-15T10:00:00+09:00" → { date: "2026-05-15", time: "10:00" } in JST. */
+export function isoToFormParts(iso: string): { date: string; time: string } {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    return { date: iso, time: "00:00" };
+  }
+  const naive = iso.length >= 16 ? iso.slice(0, 16) : iso;
+  const [date, time] = naive.split("T");
+  return { date: date ?? "", time: (time ?? "00:00").slice(0, 5) };
+}
+
+/** Compose JST RFC3339 from `YYYY-MM-DD` + `HH:MM` form parts. */
+export function formPartsToIso(date: string, time: string): string {
+  const safeTime = /^\d{2}:\d{2}$/.test(time) ? `${time}:00` : "00:00:00";
+  return `${date}T${safeTime}+09:00`;
+}
+
 const WEEKDAYS_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
 export function formatDateHeading(d: Date): string {
