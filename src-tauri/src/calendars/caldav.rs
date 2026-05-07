@@ -458,6 +458,11 @@ fn build_vcalendar(uid: &str, draft: &EventDraft, sequence: u32) -> AppResult<St
             out.push_str(&format!("DESCRIPTION:{}\r\n", ical_escape(body)));
         }
     }
+    if let Some(rrule) = &draft.recurrence_rule {
+        if !rrule.is_empty() {
+            out.push_str(&format!("RRULE:{}\r\n", rrule));
+        }
+    }
 
     out.push_str("END:VEVENT\r\n");
     out.push_str("END:VCALENDAR\r\n");
@@ -517,6 +522,15 @@ fn extract_uid(ics: &str) -> Option<String> {
     None
 }
 
+fn extract_rrule(ics: &str) -> Option<String> {
+    for line in ics.lines() {
+        if let Some(rest) = line.strip_prefix("RRULE:") {
+            return Some(rest.trim().to_string());
+        }
+    }
+    None
+}
+
 pub async fn create_event(
     source_id: CalendarSourceId,
     calendar_id: &str,
@@ -556,7 +570,17 @@ pub async fn update_event(
         .and_then(extract_uid)
         .unwrap_or_else(generate_uid);
 
-    let ics = build_vcalendar(&uid, draft, 1)?;
+    // Preserve the original RRULE if the draft doesn't supply one. Without this every
+    // update would silently flatten a recurring event into a single occurrence because
+    // build_vcalendar rebuilds the .ics from scratch.
+    let mut effective = draft.clone();
+    if effective.recurrence_rule.is_none() {
+        if let Some(existing_rrule) = existing.as_deref().and_then(extract_rrule) {
+            effective.recurrence_rule = Some(existing_rrule);
+        }
+    }
+
+    let ics = build_vcalendar(&uid, &effective, 1)?;
     put_ics(&creds, &resource_url, &ics, false).await?;
 
     Ok(unified_from_draft(

@@ -66,6 +66,10 @@ export type EventDraft = {
   isAllDay: boolean;
   location?: string;
   body?: string;
+  /** RFC 5545 RRULE (without the `RRULE:` prefix). Calendo presets emit
+   *  `FREQ=DAILY`, `FREQ=WEEKLY`, `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR`,
+   *  `FREQ=MONTHLY`, `FREQ=YEARLY`, optionally with `;UNTIL=YYYYMMDD[T235959Z]`. */
+  recurrenceRule?: string;
 };
 
 export type RecurringEditScope = "this" | "this_and_following" | "all";

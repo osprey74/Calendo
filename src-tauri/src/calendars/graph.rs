@@ -2,7 +2,7 @@ use crate::auth::oauth::send_with_refresh;
 use crate::calendars::util::percent_encode_segment;
 use crate::error::{AppError, AppResult};
 use crate::models::{CalendarMeta, CalendarSourceId, EventDraft, UnifiedEvent};
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc, Weekday};
 use chrono_tz::Tz;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -260,7 +260,125 @@ fn build_event_payload(draft: &EventDraft) -> AppResult<JsonValue> {
             obj["body"] = json!({ "contentType": "text", "content": body });
         }
     }
+    if let Some(rrule) = &draft.recurrence_rule {
+        if let Some(recurrence) = build_graph_recurrence(rrule, &draft.start, draft.is_all_day)? {
+            obj["recurrence"] = recurrence;
+        }
+    }
     Ok(obj)
+}
+
+/// Translate a RFC 5545 RRULE (the small subset Calendo's UI emits) into Graph's nested
+/// `recurrence` JSON. Returns `None` for unsupported RRULE shapes — callers can decide to
+/// drop the recurrence rather than failing the request outright.
+fn build_graph_recurrence(
+    rrule: &str,
+    start_iso: &str,
+    is_all_day: bool,
+) -> AppResult<Option<JsonValue>> {
+    let parts = parse_rrule(rrule);
+    let Some(freq) = parts.get("FREQ").map(|s| s.as_str()) else {
+        return Ok(None);
+    };
+    let start_date = parse_start_date(start_iso, is_all_day)?;
+
+    let pattern = match freq {
+        "DAILY" => json!({ "type": "daily", "interval": 1 }),
+        "WEEKLY" => {
+            let days = parts
+                .get("BYDAY")
+                .map(|byday| {
+                    byday
+                        .split(',')
+                        .filter_map(byday_to_graph_name)
+                        .collect::<Vec<_>>()
+                })
+                .filter(|v: &Vec<_>| !v.is_empty())
+                .unwrap_or_else(|| vec![weekday_to_graph_name(start_date.weekday())]);
+            json!({
+                "type": "weekly",
+                "interval": 1,
+                "daysOfWeek": days,
+                "firstDayOfWeek": "sunday",
+            })
+        }
+        "MONTHLY" => json!({
+            "type": "absoluteMonthly",
+            "interval": 1,
+            "dayOfMonth": start_date.day(),
+        }),
+        "YEARLY" => json!({
+            "type": "absoluteYearly",
+            "interval": 1,
+            "dayOfMonth": start_date.day(),
+            "month": start_date.month(),
+        }),
+        _ => return Ok(None),
+    };
+
+    let start_str = start_date.format("%Y-%m-%d").to_string();
+    let range = match parts.get("UNTIL").and_then(|u| parse_until_date(u)) {
+        Some(end_date) => json!({
+            "type": "endDate",
+            "startDate": start_str,
+            "endDate": end_date.format("%Y-%m-%d").to_string(),
+        }),
+        None => json!({ "type": "noEnd", "startDate": start_str }),
+    };
+
+    Ok(Some(json!({ "pattern": pattern, "range": range })))
+}
+
+fn parse_rrule(rrule: &str) -> std::collections::HashMap<String, String> {
+    rrule
+        .split(';')
+        .filter_map(|part| {
+            let (k, v) = part.split_once('=')?;
+            Some((k.trim().to_uppercase(), v.trim().to_string()))
+        })
+        .collect()
+}
+
+fn parse_start_date(iso: &str, is_all_day: bool) -> AppResult<NaiveDate> {
+    if is_all_day {
+        NaiveDate::parse_from_str(iso, "%Y-%m-%d")
+            .map_err(|e| AppError::Other(format!("invalid date {iso}: {e}")))
+    } else {
+        let prefix = iso.get(..10).unwrap_or(iso);
+        NaiveDate::parse_from_str(prefix, "%Y-%m-%d")
+            .map_err(|e| AppError::Other(format!("invalid datetime {iso}: {e}")))
+    }
+}
+
+fn parse_until_date(until: &str) -> Option<NaiveDate> {
+    // Accept both YYYYMMDD and YYYYMMDDTHHMMSSZ; we only need the date portion for Graph.
+    let date_part = until.split('T').next()?;
+    NaiveDate::parse_from_str(date_part, "%Y%m%d").ok()
+}
+
+fn byday_to_graph_name(day: &str) -> Option<&'static str> {
+    match day.trim().to_uppercase().as_str() {
+        "MO" => Some("monday"),
+        "TU" => Some("tuesday"),
+        "WE" => Some("wednesday"),
+        "TH" => Some("thursday"),
+        "FR" => Some("friday"),
+        "SA" => Some("saturday"),
+        "SU" => Some("sunday"),
+        _ => None,
+    }
+}
+
+fn weekday_to_graph_name(w: Weekday) -> &'static str {
+    match w {
+        Weekday::Mon => "monday",
+        Weekday::Tue => "tuesday",
+        Weekday::Wed => "wednesday",
+        Weekday::Thu => "thursday",
+        Weekday::Fri => "friday",
+        Weekday::Sat => "saturday",
+        Weekday::Sun => "sunday",
+    }
 }
 
 fn build_datetime_pair(draft: &EventDraft) -> AppResult<(JsonValue, JsonValue)> {

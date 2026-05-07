@@ -104,6 +104,12 @@ pub struct EventDraft {
     pub location: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
+    /// Optional RFC 5545 RRULE (without the `RRULE:` prefix). Phase 4.x emits a small set
+    /// of presets — `FREQ=DAILY`, `FREQ=WEEKLY[;BYDAY=...]`, `FREQ=MONTHLY`, `FREQ=YEARLY`,
+    /// optionally with `;UNTIL=...`. Provider modules translate this to their native
+    /// recurrence shape (Graph: JSON `recurrence` object; GCal/CalDAV: pass-through RRULE).
+    #[serde(rename = "recurrenceRule", default, skip_serializing_if = "Option::is_none")]
+    pub recurrence_rule: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

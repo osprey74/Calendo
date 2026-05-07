@@ -213,6 +213,12 @@ fn build_event_payload(draft: &EventDraft) -> AppResult<JsonValue> {
         obj["start"] = json!({ "dateTime": draft.start, "timeZone": "Asia/Tokyo" });
         obj["end"] = json!({ "dateTime": draft.end, "timeZone": "Asia/Tokyo" });
     }
+    if let Some(rrule) = &draft.recurrence_rule {
+        if !rrule.is_empty() {
+            // Google expects the array of full content lines, so prefix with `RRULE:`.
+            obj["recurrence"] = json!([format!("RRULE:{}", rrule)]);
+        }
+    }
     Ok(obj)
 }
 

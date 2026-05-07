@@ -65,6 +65,13 @@ export function EventModal({
     isRecurringEdit && canEditSingleInstance(initial.sourceId) ? "this" : "all",
   );
 
+  // Recurrence picker — only exposed in create mode. In edit mode the existing RRULE is
+  // preserved by the backend (Graph/GCal omit `recurrence` on PATCH; CalDAV reads back the
+  // existing RRULE before PUT). Phase 5+ will add an edit picker that handles arbitrary
+  // RRULEs (including the round-trip back into a preset bucket).
+  const [recurrencePreset, setRecurrencePreset] = useState<RecurrencePreset>("none");
+  const [recurrenceUntil, setRecurrenceUntil] = useState<string>(""); // YYYY-MM-DD or empty
+
   // When the user changes the source, pick a writable calendar from that source so the
   // 2-stage selector stays in a valid state without forcing the user to re-tap it.
   const writableCalendars = (calendars[sourceId] ?? []).filter((c) => c.isWritable);
@@ -137,6 +144,11 @@ export function EventModal({
         endTime,
         location,
         body,
+        // Only emit a recurrence rule on create. On edit we preserve the original.
+        recurrenceRule:
+          mode.kind === "create"
+            ? rrulePresetToString(recurrencePreset, startDate, isAllDay, recurrenceUntil)
+            : undefined,
       });
       if (mode.kind === "create") {
         await createEvent(draft);
@@ -265,6 +277,55 @@ export function EventModal({
                   iCloud では繰り返しイベントの個別編集は未対応です（マスタ全体に適用されます）
                 </span>
               )}
+            </Field>
+          )}
+
+          {mode.kind === "create" && (
+            <Field label="繰り返し">
+              <select
+                value={recurrencePreset}
+                onChange={(e) =>
+                  setRecurrencePreset(e.currentTarget.value as RecurrencePreset)
+                }
+                title="繰り返し"
+              >
+                <option value="none">繰り返しなし</option>
+                <option value="daily">毎日</option>
+                <option value="weekly">毎週（{weekdayLabel(startDate)}）</option>
+                <option value="weekdays">平日のみ（月〜金）</option>
+                <option value="monthly">毎月（{dayOfMonthLabel(startDate)}）</option>
+                <option value="yearly">毎年（{monthDayLabel(startDate)}）</option>
+              </select>
+              {recurrencePreset !== "none" && (
+                <div className="datetime-row">
+                  <span className="hint">終了日（任意）:</span>
+                  <input
+                    type="date"
+                    value={recurrenceUntil}
+                    onChange={(e) => setRecurrenceUntil(e.currentTarget.value)}
+                    title="繰り返し終了日"
+                  />
+                  {recurrenceUntil && (
+                    <button
+                      type="button"
+                      className="duration-btn"
+                      onClick={() => setRecurrenceUntil("")}
+                    >
+                      クリア
+                    </button>
+                  )}
+                </div>
+              )}
+            </Field>
+          )}
+
+          {mode.kind === "edit" && mode.event.isRecurring && (
+            <Field label="繰り返し">
+              <span className="hint">
+                {mode.event.recurrenceRule
+                  ? `現在の RRULE: ${mode.event.recurrenceRule}（変更不可・Phase 5+）`
+                  : "繰り返しイベント（ルール変更は Phase 5+）"}
+              </span>
             </Field>
           )}
 
@@ -519,6 +580,73 @@ function ceilToHalfHour(d: Date): { date: string; time: string } {
   return { date: ymd(out), time: `${hh}:${mm}` };
 }
 
+type RecurrencePreset = "none" | "daily" | "weekly" | "weekdays" | "monthly" | "yearly";
+
+const WEEKDAY_RRULE_TOKENS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"] as const;
+const WEEKDAY_LABELS_JA = ["日", "月", "火", "水", "木", "金", "土"] as const;
+
+function parseFormDateLocal(date: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function weekdayLabel(date: string): string {
+  const d = parseFormDateLocal(date);
+  return d ? `${WEEKDAY_LABELS_JA[d.getDay()]}曜日` : "—";
+}
+
+function dayOfMonthLabel(date: string): string {
+  const d = parseFormDateLocal(date);
+  return d ? `${d.getDate()}日` : "—";
+}
+
+function monthDayLabel(date: string): string {
+  const d = parseFormDateLocal(date);
+  return d ? `${d.getMonth() + 1}月${d.getDate()}日` : "—";
+}
+
+/** Compose an RFC 5545 RRULE from a preset + form context. Returns `undefined` for the
+ *  "none" preset so the draft omits the field cleanly. */
+function rrulePresetToString(
+  preset: RecurrencePreset,
+  startDate: string,
+  isAllDay: boolean,
+  until: string,
+): string | undefined {
+  if (preset === "none") return undefined;
+  const startLocal = parseFormDateLocal(startDate);
+  if (!startLocal) return undefined;
+
+  let base: string;
+  switch (preset) {
+    case "daily":
+      base = "FREQ=DAILY";
+      break;
+    case "weekly":
+      base = `FREQ=WEEKLY;BYDAY=${WEEKDAY_RRULE_TOKENS[startLocal.getDay()]}`;
+      break;
+    case "weekdays":
+      base = "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR";
+      break;
+    case "monthly":
+      base = "FREQ=MONTHLY";
+      break;
+    case "yearly":
+      base = "FREQ=YEARLY";
+      break;
+  }
+
+  if (until && /^\d{4}-\d{2}-\d{2}$/.test(until)) {
+    const compact = until.replace(/-/g, "");
+    // For all-day events, RFC 5545 allows date-only UNTIL. For timed events, providers
+    // expect a UTC datetime — normalize to end-of-day Z so the event on the UNTIL date
+    // is still included.
+    base += isAllDay ? `;UNTIL=${compact}` : `;UNTIL=${compact}T235959Z`;
+  }
+  return base;
+}
+
 const DURATION_PRESETS: { label: string; minutes: number }[] = [
   { label: "10分", minutes: 10 },
   { label: "15分", minutes: 15 },
@@ -585,6 +713,7 @@ function buildDraft(args: {
   endTime: string;
   location: string;
   body: string;
+  recurrenceRule?: string;
 }): EventDraft {
   const { sourceId, calendarId, title, isAllDay, startDate, endDate } = args;
   const start = isAllDay ? startDate : formPartsToIso(startDate, args.startTime);
@@ -598,5 +727,6 @@ function buildDraft(args: {
     isAllDay,
     location: args.location.trim() || undefined,
     body: args.body.trim() || undefined,
+    recurrenceRule: args.recurrenceRule,
   };
 }

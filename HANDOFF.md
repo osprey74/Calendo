@@ -2,7 +2,7 @@
 
 **最終更新**: 2026-05-06
 **バージョン**: v0.1.0（開発中）
-**フェーズ**: Phase 4.1（401 自動リトライ＋繰り返し編集スコープ）— 実装完了、実機動作確認待ち。「この日以降すべて」は Phase 5+ に先送り（マスタ recurrence 終端付け替え＋新シリーズ作成の複合操作のため）
+**フェーズ**: Phase 4.2（繰り返し予定の作成 UI）— 全 3 ソースで RRULE プリセットからの作成に対応。編集時の RRULE 変更と「この日以降すべて」スコープは Phase 5+ に先送り
 
 ---
 
@@ -268,8 +268,29 @@ gh secret set GOOGLE_CLIENT_SECRET --repo osprey74/Calendo
 - **401 リトライの closure パターン**: `Fn(&str) -> RequestBuilder` で再構築。RequestBuilder が Clone でないため二度ビルド。`.json(&payload)` のシリアライズが各呼び出しで走るが小ペイロードなので実害なし
 - **CalDAV recurring の "すべて" 動作**: 既存の `caldav_resource_url(event_id)` が `<url>::<recurrence-id>` の `::` 以降を strip してマスタ resource URL を返すため、そのまま PUT/DELETE すれば全インスタンス対象になる
 
+#### Phase 4.2（実装済み）
+
+- [x] 繰り返し予定の作成 UI — [EventModal.tsx](src/components/events/EventModal.tsx) にプリセット dropdown 追加
+  - **プリセット**: なし / 毎日 / 毎週（開始日の曜日） / 平日のみ（月〜金） / 毎月（開始日の日） / 毎年（開始日の月日）
+  - **任意の終了日**（UNTIL）も同フィールド内で指定可能
+  - フロントが RFC 5545 RRULE 文字列を生成 → 各 provider 向けに backend が変換
+- [x] **Graph**: RRULE → JSON `recurrence` オブジェクト変換（[graph.rs](src-tauri/src/calendars/graph.rs) `build_graph_recurrence`）
+  - daily / weekly+BYDAY / absoluteMonthly / absoluteYearly に対応
+  - `range` は `noEnd` または `endDate`（UNTIL 指定時）
+- [x] **GCal**: `recurrence: ["RRULE:..."]` 配列で送信（[gcal.rs](src-tauri/src/calendars/gcal.rs)）
+- [x] **CalDAV**: VEVENT に `RRULE:` 行を出力（[caldav.rs](src-tauri/src/calendars/caldav.rs) `build_vcalendar`）
+- [x] CalDAV update 時の RRULE 保持 — `extract_rrule()` で既存 .ics から RRULE を読み出し、draft が空なら引き継ぐ。ないと既存の繰り返しが update のたびに消える
+
+#### Phase 4.2 実装メモ
+
+- **編集時の RRULE は不変**: create フォームのみピッカーを表示。edit モードでは既存ルールを表示するだけ（変更不可）。Graph/GCal は PATCH に `recurrence` を含めなければ既存ルールを保持。CalDAV は明示的に extract→引き継ぎ
+- **UNTIL の正規化**: 終日イベントは `YYYYMMDD`、時刻ありは `YYYYMMDDT235959Z`（UTC 終日）でフォームから生成。RFC 5545 上、時刻ありイベントの UNTIL は UTC date-time が要求されるため
+- **プリセットの「日本式」表現**: ユーザーが見るのは「毎週 月曜日」「毎月 13日」のような日本語ラベル。内部の RRULE は `FREQ=WEEKLY;BYDAY=MO` のような英語標準仕様
+- **edit 時の表示**: 現在の RRULE を文字列で表示するだけのリードオンリー UI。Phase 5+ で RRULE → プリセット逆引き＋カスタムエディタを実装予定
+
 #### Phase 5 持ち越し
 
+- [ ] 編集モードでの RRULE 変更 UI（プリセット逆引き＋カスタム RRULE エディタ）
 - [ ] 「この日以降すべて」スコープ — Graph/GCal で単一 API 呼び出し不可。マスタ recurrence range 終端付け替え＋新シリーズ作成の複合操作が必要
 - [ ] CalDAV 繰り返しの「この1件のみ」: `RECURRENCE-ID` 付き VEVENT 部分上書き、`EXDATE` 追記による単一インスタンス削除
 - [ ] エラーハンドリング全網羅（DESIGN.md「エラーハンドリング方針」表）— 現状は Toast にエラー文字列を投げるのみ
