@@ -2,7 +2,7 @@
 
 **最終更新**: 2026-05-06
 **バージョン**: v0.1.0（開発中）
-**フェーズ**: Phase 4.0（仕上げ：永続化・トースト・オンボーディング・アイコン）— 実装完了、実機動作確認待ち。繰り返しスコープ別編集と 401 自動リトライは Phase 4.x に持ち越し
+**フェーズ**: Phase 4.1（401 自動リトライ＋繰り返し編集スコープ）— 実装完了、実機動作確認待ち。「この日以降すべて」は Phase 5+ に先送り（マスタ recurrence 終端付け替え＋新シリーズ作成の複合操作のため）
 
 ---
 
@@ -251,13 +251,27 @@ gh secret set GOOGLE_CLIENT_SECRET --repo osprey74/Calendo
 - **Onboarding 検出**: `loading=false && events.length===0 && すべてのソース calendars が null か []`。一旦接続して再起動した状態（calendars が取得済み・events 0 件）では出ない仕様
 - **ConnectionPanel の SettingsModal 化**: HANDOFF 当初想定では SettingsModal にカレンダー表示設定（色・ラベル上書き）を統合する案だったが、Phase 4.0 では既存 ConnectionPanel をそのまま流用。色・ラベルのカスタマイズは Phase 5+ に先送り
 
-#### Phase 4.x 持ち越し
+#### Phase 4.1（実装済み）
 
-- [ ] 繰り返しイベント編集ダイアログ（「この1件のみ」「以降すべて」「すべて」）
-- [ ] Graph 繰り返しスコープ別の API 呼び出し分岐（`thisAndFollowing` / `singleInstance` / `master`）
-- [ ] Google Calendar 繰り返し系（`recurringEventId` 連動）
-- [ ] CalDAV 繰り返し: `RECURRENCE-ID` 付き VEVENT 部分上書き、`EXDATE` 追記による単一インスタンス削除
-- [ ] 自動トークンリフレッシュ（401 検出 → リフレッシュ → リトライ）— 現状 `ensure_fresh` の事前チェックで 95% カバー、サーバ側のクロックスキューや revoke は再認証が必要
+- [x] 自動トークンリフレッシュ（401 → refresh → retry）— [oauth.rs](src-tauri/src/auth/oauth.rs) `send_with_refresh()` 共通化
+  - Graph / GCal の全認証付きリクエスト（fetch_calendars / fetch_events / create_event / update_event / delete_event）が 401 受信時に自動リフレッシュ＋リトライ
+  - サーバ側クロックスキュー・トークン revoke 直後・refresh 直後の旧トークン使用ケース等に対応
+- [x] 繰り返しイベント編集スコープ（「この1件のみ」「すべて」）— [EventModal.tsx](src/components/events/EventModal.tsx) / [EventDetailsModal.tsx](src/components/events/EventDetailsModal.tsx)
+  - **Graph / GCal**: per-instance id（イベントクリックで取れた id）と series master id（`recurringEventId`）をフロントで切り替えて backend に渡すことで API 標準のスコープ動作を実現
+  - **CalDAV**: 「すべて」スコープのみサポート（書き込みがリソース単位のため。「この1件のみ」は無効化＋ヒント表示）
+  - 編集: EventModal 内に「編集範囲」ラジオを表示、デフォルトは "this"（ユーザーがクリックしたインスタンスを意図する想定）
+  - 削除: EventDetailsModal で削除ボタン → インライン確認ダイアログに切替、繰り返しイベントなら「この1件のみ削除 / すべて削除 / キャンセル」のボタン
+
+#### Phase 4.1 実装メモ
+
+- **scope → targetId 解決はフロント側**: backend は `event_id` パラメータで指定されたものを操作するだけ。frontend が `scope=="all"` の場合 `event.recurringEventId` をターゲットに切り替える。`recurringScope` フィールドは現状 backend では情報用（CalDAV "this" や thisAndFollowing 実装時に使う想定）
+- **401 リトライの closure パターン**: `Fn(&str) -> RequestBuilder` で再構築。RequestBuilder が Clone でないため二度ビルド。`.json(&payload)` のシリアライズが各呼び出しで走るが小ペイロードなので実害なし
+- **CalDAV recurring の "すべて" 動作**: 既存の `caldav_resource_url(event_id)` が `<url>::<recurrence-id>` の `::` 以降を strip してマスタ resource URL を返すため、そのまま PUT/DELETE すれば全インスタンス対象になる
+
+#### Phase 5 持ち越し
+
+- [ ] 「この日以降すべて」スコープ — Graph/GCal で単一 API 呼び出し不可。マスタ recurrence range 終端付け替え＋新シリーズ作成の複合操作が必要
+- [ ] CalDAV 繰り返しの「この1件のみ」: `RECURRENCE-ID` 付き VEVENT 部分上書き、`EXDATE` 追記による単一インスタンス削除
 - [ ] エラーハンドリング全網羅（DESIGN.md「エラーハンドリング方針」表）— 現状は Toast にエラー文字列を投げるのみ
 - [ ] SettingsModal でサブカレンダーの色・ラベル上書き（カスタマイズ）
 - [ ] イベントのソース／カレンダー間移動（現状: 削除＋再作成）

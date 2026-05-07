@@ -3,6 +3,7 @@ import type {
   CalendarMeta,
   CalendarSourceId,
   EventDraft,
+  RecurringEditScope,
   UnifiedEvent,
 } from "../../types";
 import { DEFAULT_SOURCES } from "../../types";
@@ -18,6 +19,13 @@ import "./EventModal.css";
 type Mode =
   | { kind: "create"; defaultDate: Date }
   | { kind: "edit"; event: UnifiedEvent };
+
+/** Whether the source's API allows editing a single instance of a recurring event.
+ *  Graph and GCal expose per-instance ids natively; CalDAV writes are always
+ *  resource-level so editing a single instance is unsupported in Phase 4.x. */
+function canEditSingleInstance(sourceId: CalendarSourceId): boolean {
+  return sourceId !== "icloud";
+}
 
 export function EventModal({
   mode,
@@ -43,6 +51,19 @@ export function EventModal({
   const [body, setBody] = useState(initial.body);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Scope only matters in edit mode for recurring events. Default to "this" for Graph/GCal
+  // (least-surprise: the user usually means the occurrence they clicked) and to "all" for
+  // CalDAV (its API only operates on the master resource).
+  const isRecurringEdit = mode.kind === "edit" && mode.event.isRecurring;
+  const scopeAvailable: RecurringEditScope[] = isRecurringEdit
+    ? canEditSingleInstance(initial.sourceId)
+      ? ["this", "all"]
+      : ["all"]
+    : [];
+  const [scope, setScope] = useState<RecurringEditScope>(
+    isRecurringEdit && canEditSingleInstance(initial.sourceId) ? "this" : "all",
+  );
 
   // When the user changes the source, pick a writable calendar from that source so the
   // 2-stage selector stays in a valid state without forcing the user to re-tap it.
@@ -120,7 +141,15 @@ export function EventModal({
       if (mode.kind === "create") {
         await createEvent(draft);
       } else {
-        await updateEvent(mode.event.id, draft);
+        // For "all" scope on a recurring event, target the series master id (Graph's
+        // seriesMasterId / GCal's recurringEventId). CalDAV's id strips its `::recurrence`
+        // discriminator inside the backend, so passing event.id always operates on the
+        // master — `all` is the only meaningful scope there.
+        const target =
+          scope === "all" && mode.event.recurringEventId
+            ? mode.event.recurringEventId
+            : mode.event.id;
+        await updateEvent(target, draft, isRecurringEdit ? scope : undefined);
       }
       onClose();
     } catch (e) {
@@ -204,6 +233,40 @@ export function EventModal({
               <span>終日</span>
             </label>
           </Field>
+
+          {isRecurringEdit && (
+            <Field label="編集範囲">
+              <div className="scope-row">
+                <ScopeOption
+                  label="この1件のみ"
+                  value="this"
+                  current={scope}
+                  available={scopeAvailable}
+                  onSelect={setScope}
+                />
+                <ScopeOption
+                  label="この日以降すべて"
+                  value="this_and_following"
+                  current={scope}
+                  available={scopeAvailable}
+                  onSelect={setScope}
+                  disabledHint="未対応（Phase 5+）"
+                />
+                <ScopeOption
+                  label="すべて"
+                  value="all"
+                  current={scope}
+                  available={scopeAvailable}
+                  onSelect={setScope}
+                />
+              </div>
+              {!canEditSingleInstance(initial.sourceId) && (
+                <span className="hint">
+                  iCloud では繰り返しイベントの個別編集は未対応です（マスタ全体に適用されます）
+                </span>
+              )}
+            </Field>
+          )}
 
           <Field label="開始">
             <div className="datetime-row">
@@ -316,6 +379,35 @@ function Field({
       </label>
       <div className="event-field-input">{children}</div>
     </div>
+  );
+}
+
+function ScopeOption({
+  label,
+  value,
+  current,
+  available,
+  onSelect,
+  disabledHint,
+}: {
+  label: string;
+  value: RecurringEditScope;
+  current: RecurringEditScope;
+  available: RecurringEditScope[];
+  onSelect: (s: RecurringEditScope) => void;
+  disabledHint?: string;
+}) {
+  const enabled = available.includes(value);
+  return (
+    <button
+      type="button"
+      className={`scope-btn ${current === value ? "active" : ""}`}
+      disabled={!enabled}
+      title={!enabled ? disabledHint ?? "未対応" : label}
+      onClick={() => onSelect(value)}
+    >
+      {label}
+    </button>
   );
 }
 

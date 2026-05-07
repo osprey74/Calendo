@@ -1,4 +1,4 @@
-use crate::auth::oauth::ensure_fresh;
+use crate::auth::oauth::send_with_refresh;
 use crate::calendars::util::percent_encode_segment;
 use crate::error::{AppError, AppResult};
 use crate::models::{CalendarMeta, CalendarSourceId, EventDraft, UnifiedEvent};
@@ -27,14 +27,13 @@ struct GCalCalendarList {
 }
 
 pub async fn fetch_calendars(source_id: CalendarSourceId) -> AppResult<Vec<CalendarMeta>> {
-    let tokens = ensure_fresh(source_id).await?;
     let client = reqwest::Client::new();
-    let resp = client
-        .get(format!("{GCAL_BASE}/users/me/calendarList"))
-        .bearer_auth(&tokens.access_token)
-        .send()
-        .await?
-        .error_for_status()?;
+    let url = format!("{GCAL_BASE}/users/me/calendarList");
+    let resp = send_with_refresh(source_id, |token| {
+        client.get(&url).bearer_auth(token)
+    })
+    .await?
+    .error_for_status()?;
     let body: GCalCalendarList = resp.json().await?;
 
     let calendars = body
@@ -97,7 +96,6 @@ pub async fn fetch_events(
     date_from: &str,
     date_to: &str,
 ) -> AppResult<Vec<UnifiedEvent>> {
-    let tokens = ensure_fresh(source_id).await?;
     let client = reqwest::Client::new();
 
     // Google requires RFC3339 timeMin/timeMax. Use UTC bounds spanning the requested dates.
@@ -118,12 +116,11 @@ pub async fn fetch_events(
             url.push_str(&format!("&pageToken={}", percent_encode_segment(token)));
         }
 
-        let resp = client
-            .get(&url)
-            .bearer_auth(&tokens.access_token)
-            .send()
-            .await?
-            .error_for_status()?;
+        let resp = send_with_refresh(source_id, |token| {
+            client.get(&url).bearer_auth(token)
+        })
+        .await?
+        .error_for_status()?;
         let body: GCalEventList = resp.json().await?;
 
         for e in body.items {
@@ -224,18 +221,15 @@ pub async fn create_event(
     calendar_id: &str,
     draft: &EventDraft,
 ) -> AppResult<UnifiedEvent> {
-    let tokens = ensure_fresh(source_id).await?;
     let calendar_seg = percent_encode_segment(calendar_id);
     let url = format!("{GCAL_BASE}/calendars/{calendar_seg}/events");
     let payload = build_event_payload(draft)?;
     let client = reqwest::Client::new();
-    let resp = client
-        .post(&url)
-        .bearer_auth(&tokens.access_token)
-        .json(&payload)
-        .send()
-        .await?
-        .error_for_status()?;
+    let resp = send_with_refresh(source_id, |token| {
+        client.post(&url).bearer_auth(token).json(&payload)
+    })
+    .await?
+    .error_for_status()?;
     let event: GCalEvent = resp.json().await?;
     gcal_event_to_unified(source_id, calendar_id, event)
         .ok_or_else(|| AppError::Other("GCal create returned event with invalid datetimes".into()))
@@ -247,19 +241,16 @@ pub async fn update_event(
     event_id: &str,
     draft: &EventDraft,
 ) -> AppResult<UnifiedEvent> {
-    let tokens = ensure_fresh(source_id).await?;
     let calendar_seg = percent_encode_segment(calendar_id);
     let event_seg = percent_encode_segment(event_id);
     let url = format!("{GCAL_BASE}/calendars/{calendar_seg}/events/{event_seg}");
     let payload = build_event_payload(draft)?;
     let client = reqwest::Client::new();
-    let resp = client
-        .patch(&url)
-        .bearer_auth(&tokens.access_token)
-        .json(&payload)
-        .send()
-        .await?
-        .error_for_status()?;
+    let resp = send_with_refresh(source_id, |token| {
+        client.patch(&url).bearer_auth(token).json(&payload)
+    })
+    .await?
+    .error_for_status()?;
     let event: GCalEvent = resp.json().await?;
     gcal_event_to_unified(source_id, calendar_id, event)
         .ok_or_else(|| AppError::Other("GCal update returned event with invalid datetimes".into()))
@@ -270,7 +261,6 @@ pub async fn delete_event(
     calendar_id: &str,
     event_id: &str,
 ) -> AppResult<()> {
-    let tokens = ensure_fresh(source_id).await?;
     let calendar_seg = percent_encode_segment(calendar_id);
     let event_seg = percent_encode_segment(event_id);
     // sendUpdates=none avoids notifying attendees of cancellations the user is just
@@ -279,11 +269,10 @@ pub async fn delete_event(
         "{GCAL_BASE}/calendars/{calendar_seg}/events/{event_seg}?sendUpdates=none"
     );
     let client = reqwest::Client::new();
-    let resp = client
-        .delete(&url)
-        .bearer_auth(&tokens.access_token)
-        .send()
-        .await?;
+    let resp = send_with_refresh(source_id, |token| {
+        client.delete(&url).bearer_auth(token)
+    })
+    .await?;
     let status = resp.status();
     if !status.is_success() && status.as_u16() != 404 && status.as_u16() != 410 {
         let text = resp.text().await.unwrap_or_default();

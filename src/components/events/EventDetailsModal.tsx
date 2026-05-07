@@ -1,11 +1,15 @@
 import { useState } from "react";
-import type { UnifiedEvent } from "../../types";
+import type { CalendarSourceId, RecurringEditScope, UnifiedEvent } from "../../types";
 import { DEFAULT_SOURCES } from "../../types";
 import { useCalendarStore } from "../../store/calendarStore";
 import { allDayEndInclusive, eventStart, eventEnd } from "../../utils/eventUtils";
 import { formatDateHeading, formatTimeShort, isSameDay } from "../../utils/dateUtils";
 import { EventModal } from "./EventModal";
 import "./EventDetailsModal.css";
+
+function canEditSingleInstance(sourceId: CalendarSourceId): boolean {
+  return sourceId !== "icloud";
+}
 
 export function EventDetailsModal({
   event,
@@ -21,6 +25,7 @@ export function EventDetailsModal({
   const calendarColor = calendar?.color ?? source?.color ?? "#888";
 
   const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -31,25 +36,22 @@ export function EventDetailsModal({
   const endDate = formatDateHeading(inclusiveEnd);
   const allDaySingleDay = event.isAllDay && isSameDay(start, inclusiveEnd);
 
-  // Phase 3.0: writes target the event id directly. Recurring events on Graph/GCal accept
-  // edits/deletes on the per-instance id (single-instance scope); CalDAV recurring is not
-  // safely editable yet (see HANDOFF Phase 4 notes), so we disable writes for those.
-  const isCalDavRecurring = event.sourceId === "icloud" && event.isRecurring;
-  const isWritable = (calendar?.isWritable ?? false) && !isCalDavRecurring;
+  const isWritable = calendar?.isWritable ?? false;
   const writeBlockReason = !calendar
     ? "カレンダー一覧未取得"
     : !calendar.isWritable
       ? "読み取り専用カレンダー"
-      : isCalDavRecurring
-        ? "iCloud 繰り返しイベントの編集は未対応"
-        : null;
+      : null;
 
-  const handleDelete = async () => {
-    if (!confirm(`「${event.title || "(無題)"}」を削除しますか？`)) return;
+  // For recurring events on Graph/GCal, "this" means the per-instance id; "all" requires
+  // resolving to the master id. CalDAV only supports "all" since writes are resource-level.
+  const performDelete = async (scope: RecurringEditScope | undefined) => {
     setDeleting(true);
     setActionError(null);
     try {
-      await deleteEvent(event.sourceId, event.calendarId, event.id);
+      const targetId =
+        scope === "all" && event.recurringEventId ? event.recurringEventId : event.id;
+      await deleteEvent(event.sourceId, event.calendarId, targetId, scope);
       onClose();
     } catch (e) {
       setActionError(String(e));
@@ -134,27 +136,103 @@ export function EventDetailsModal({
 
           {actionError && <div className="event-form-error">{actionError}</div>}
 
-          <div className="event-details-actions">
-            {writeBlockReason && (
-              <span className="hint warn">{writeBlockReason}</span>
-            )}
-            <button
-              type="button"
-              className="danger"
-              disabled={!isWritable || deleting}
-              onClick={handleDelete}
-            >
-              {deleting ? "削除中…" : "削除"}
-            </button>
-            <button
-              type="button"
-              disabled={!isWritable}
-              onClick={() => setEditing(true)}
-            >
-              編集
-            </button>
-          </div>
+          {confirmingDelete ? (
+            <DeleteConfirm
+              event={event}
+              busy={deleting}
+              onCancel={() => setConfirmingDelete(false)}
+              onConfirm={performDelete}
+            />
+          ) : (
+            <div className="event-details-actions">
+              {writeBlockReason && (
+                <span className="hint warn">{writeBlockReason}</span>
+              )}
+              <button
+                type="button"
+                className="danger"
+                disabled={!isWritable || deleting}
+                onClick={() => setConfirmingDelete(true)}
+              >
+                削除
+              </button>
+              <button
+                type="button"
+                disabled={!isWritable}
+                onClick={() => setEditing(true)}
+              >
+                編集
+              </button>
+            </div>
+          )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteConfirm({
+  event,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  event: UnifiedEvent;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (scope: RecurringEditScope | undefined) => void;
+}) {
+  if (!event.isRecurring) {
+    return (
+      <div className="event-details-confirm">
+        <p>「{event.title || "(無題)"}」を削除しますか？</p>
+        <div className="event-details-actions">
+          <button type="button" className="secondary" onClick={onCancel} disabled={busy}>
+            キャンセル
+          </button>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => onConfirm(undefined)}
+            disabled={busy}
+          >
+            {busy ? "削除中…" : "削除"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const allowSingle = canEditSingleInstance(event.sourceId);
+  return (
+    <div className="event-details-confirm">
+      <p>
+        繰り返しイベント「{event.title || "(無題)"}」を削除します。
+        {allowSingle ? "削除範囲を選択してください。" : "iCloud は系列全体の削除のみ対応しています。"}
+      </p>
+      <div className="event-details-actions wrap">
+        <button type="button" className="secondary" onClick={onCancel} disabled={busy}>
+          キャンセル
+        </button>
+        {allowSingle && (
+          <button
+            type="button"
+            className="danger"
+            onClick={() => onConfirm("this")}
+            disabled={busy}
+          >
+            この1件のみ削除
+          </button>
+        )}
+        <button
+          type="button"
+          className="danger"
+          onClick={() => onConfirm("all")}
+          disabled={busy}
+          title="繰り返し系列全体を削除"
+        >
+          すべて削除
+        </button>
       </div>
     </div>
   );

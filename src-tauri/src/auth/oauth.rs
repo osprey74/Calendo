@@ -241,3 +241,27 @@ pub async fn ensure_fresh(source_id: CalendarSourceId) -> AppResult<StoredTokens
         Ok(stored)
     }
 }
+
+/// Send an authenticated HTTP request with automatic 401 → refresh → retry.
+///
+/// `build_req` is invoked with the current access token. If the server replies 401
+/// (token revoked, clock skew, or just-rotated), we refresh once and rebuild the request
+/// with the new token. The closure is `Fn` rather than `FnOnce` because reqwest's
+/// `RequestBuilder` isn't `Clone` — re-issuing the request requires reconstructing it.
+pub async fn send_with_refresh<F>(
+    source_id: CalendarSourceId,
+    build_req: F,
+) -> AppResult<reqwest::Response>
+where
+    F: Fn(&str) -> reqwest::RequestBuilder,
+{
+    let tokens = ensure_fresh(source_id).await?;
+    let resp = build_req(&tokens.access_token).send().await?;
+    if resp.status().as_u16() != 401 {
+        return Ok(resp);
+    }
+    // Drain the 401 body so the connection can be returned to the pool cleanly.
+    let _ = resp.bytes().await;
+    let refreshed = refresh(source_id).await?;
+    Ok(build_req(&refreshed.access_token).send().await?)
+}

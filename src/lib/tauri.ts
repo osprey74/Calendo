@@ -59,10 +59,11 @@ export const eventDelete = (
   sourceId: CalendarSourceId,
   calendarId: string,
   eventId: string,
+  recurringScope?: import("../types").RecurringEditScope,
 ) =>
   invoke<void>("event_delete", {
     sourceId,
     calendarId,
     eventId,
-    recurringScope: null,
+    recurringScope: recurringScope ?? null,
   });

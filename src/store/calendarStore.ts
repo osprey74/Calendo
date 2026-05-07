@@ -69,8 +69,17 @@ type Actions = {
   hydrate: () => Promise<void>;
 
   createEvent: (draft: EventDraft) => Promise<UnifiedEvent>;
-  updateEvent: (eventId: string, draft: EventDraft) => Promise<UnifiedEvent>;
-  deleteEvent: (sourceId: CalendarSourceId, calendarId: string, eventId: string) => Promise<void>;
+  updateEvent: (
+    eventId: string,
+    draft: EventDraft,
+    scope?: import("../types").RecurringEditScope,
+  ) => Promise<UnifiedEvent>;
+  deleteEvent: (
+    sourceId: CalendarSourceId,
+    calendarId: string,
+    eventId: string,
+    scope?: import("../types").RecurringEditScope,
+  ) => Promise<void>;
 };
 
 export type CalendarStore = State & Actions;
@@ -281,9 +290,12 @@ export const useCalendarStore = create<CalendarStore>((set, get) => ({
     }
   },
 
-  updateEvent: async (eventId, draft) => {
+  updateEvent: async (eventId, draft, scope) => {
     try {
-      const updated = await eventUpdate(draft.sourceId, eventId, { draft });
+      const updated = await eventUpdate(draft.sourceId, eventId, {
+        draft,
+        recurringScope: scope,
+      });
       await get().loadEvents();
       toast.success(`「${draft.title}」を更新しました`);
       return updated;
@@ -293,9 +305,9 @@ export const useCalendarStore = create<CalendarStore>((set, get) => ({
     }
   },
 
-  deleteEvent: async (sourceId, calendarId, eventId) => {
+  deleteEvent: async (sourceId, calendarId, eventId, scope) => {
     try {
-      await eventDelete(sourceId, calendarId, eventId);
+      await eventDelete(sourceId, calendarId, eventId, scope);
       await get().loadEvents();
       toast.success("削除しました");
     } catch (e) {

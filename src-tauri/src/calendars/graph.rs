@@ -1,4 +1,4 @@
-use crate::auth::oauth::ensure_fresh;
+use crate::auth::oauth::send_with_refresh;
 use crate::calendars::util::percent_encode_segment;
 use crate::error::{AppError, AppResult};
 use crate::models::{CalendarMeta, CalendarSourceId, EventDraft, UnifiedEvent};
@@ -30,7 +30,6 @@ struct GraphCalendarList {
 }
 
 pub async fn fetch_calendars(source_id: CalendarSourceId) -> AppResult<Vec<CalendarMeta>> {
-    let tokens = ensure_fresh(source_id).await?;
     let client = reqwest::Client::new();
 
     // Default page size for /me/calendars is 10. Bump to 100 and walk nextLink so
@@ -39,12 +38,11 @@ pub async fn fetch_calendars(source_id: CalendarSourceId) -> AppResult<Vec<Calen
     let mut calendars: Vec<CalendarMeta> = Vec::new();
 
     while let Some(next) = url.take() {
-        let resp = client
-            .get(&next)
-            .bearer_auth(&tokens.access_token)
-            .send()
-            .await?
-            .error_for_status()?;
+        let resp = send_with_refresh(source_id, |token| {
+            client.get(&next).bearer_auth(token)
+        })
+        .await?
+        .error_for_status()?;
         let body: GraphCalendarList = resp.json().await?;
         for c in body.value {
             calendars.push(CalendarMeta {
@@ -117,7 +115,6 @@ pub async fn fetch_events(
     date_from: &str,
     date_to: &str,
 ) -> AppResult<Vec<UnifiedEvent>> {
-    let tokens = ensure_fresh(source_id).await?;
     let client = reqwest::Client::new();
 
     let start = format!("{date_from}T00:00:00");
@@ -135,14 +132,15 @@ pub async fn fetch_events(
     let mut events: Vec<UnifiedEvent> = Vec::new();
 
     while let Some(next) = url.take() {
-        let resp = client
-            .get(&next)
-            .bearer_auth(&tokens.access_token)
-            // Outlook: tell Graph to return times in UTC for predictable parsing.
-            .header("Prefer", r#"outlook.timezone="UTC""#)
-            .send()
-            .await?
-            .error_for_status()?;
+        let resp = send_with_refresh(source_id, |token| {
+            client
+                .get(&next)
+                .bearer_auth(token)
+                // Outlook: tell Graph to return times in UTC for predictable parsing.
+                .header("Prefer", r#"outlook.timezone="UTC""#)
+        })
+        .await?
+        .error_for_status()?;
         let body: GraphEventList = resp.json().await?;
 
         for e in body.value {
@@ -316,19 +314,19 @@ pub async fn create_event(
     calendar_id: &str,
     draft: &EventDraft,
 ) -> AppResult<UnifiedEvent> {
-    let tokens = ensure_fresh(source_id).await?;
     let calendar_seg = percent_encode_segment(calendar_id);
     let url = format!("{GRAPH_BASE}/me/calendars/{calendar_seg}/events");
     let payload = build_event_payload(draft)?;
     let client = reqwest::Client::new();
-    let resp = client
-        .post(&url)
-        .bearer_auth(&tokens.access_token)
-        .header("Prefer", r#"outlook.timezone="UTC""#)
-        .json(&payload)
-        .send()
-        .await?
-        .error_for_status()?;
+    let resp = send_with_refresh(source_id, |token| {
+        client
+            .post(&url)
+            .bearer_auth(token)
+            .header("Prefer", r#"outlook.timezone="UTC""#)
+            .json(&payload)
+    })
+    .await?
+    .error_for_status()?;
     let event: GraphEvent = resp.json().await?;
     graph_event_to_unified(source_id, calendar_id, event)
         .ok_or_else(|| AppError::Other("Graph create returned event with invalid datetimes".into()))
@@ -339,7 +337,6 @@ pub async fn update_event(
     event_id: &str,
     draft: &EventDraft,
 ) -> AppResult<UnifiedEvent> {
-    let tokens = ensure_fresh(source_id).await?;
     let event_seg = percent_encode_segment(event_id);
     // /me/events/{id} edits any event the user owns regardless of which calendar it's in,
     // so we don't need calendar_id in the URL — but we still want the response to carry
@@ -347,29 +344,28 @@ pub async fn update_event(
     let url = format!("{GRAPH_BASE}/me/events/{event_seg}");
     let payload = build_event_payload(draft)?;
     let client = reqwest::Client::new();
-    let resp = client
-        .patch(&url)
-        .bearer_auth(&tokens.access_token)
-        .header("Prefer", r#"outlook.timezone="UTC""#)
-        .json(&payload)
-        .send()
-        .await?
-        .error_for_status()?;
+    let resp = send_with_refresh(source_id, |token| {
+        client
+            .patch(&url)
+            .bearer_auth(token)
+            .header("Prefer", r#"outlook.timezone="UTC""#)
+            .json(&payload)
+    })
+    .await?
+    .error_for_status()?;
     let event: GraphEvent = resp.json().await?;
     graph_event_to_unified(source_id, &draft.calendar_id, event)
         .ok_or_else(|| AppError::Other("Graph update returned event with invalid datetimes".into()))
 }
 
 pub async fn delete_event(source_id: CalendarSourceId, event_id: &str) -> AppResult<()> {
-    let tokens = ensure_fresh(source_id).await?;
     let event_seg = percent_encode_segment(event_id);
     let url = format!("{GRAPH_BASE}/me/events/{event_seg}");
     let client = reqwest::Client::new();
-    let resp = client
-        .delete(&url)
-        .bearer_auth(&tokens.access_token)
-        .send()
-        .await?;
+    let resp = send_with_refresh(source_id, |token| {
+        client.delete(&url).bearer_auth(token)
+    })
+    .await?;
     let status = resp.status();
     if !status.is_success() && status.as_u16() != 404 {
         let text = resp.text().await.unwrap_or_default();

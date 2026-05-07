@@ -130,6 +130,38 @@
   color: var(--accent);
 }
 
+.scope-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scope-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.scope-btn:hover:not(:disabled):not(.active) {
+  background: var(--surface-2);
+}
+
+.scope-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.scope-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .event-form-error {
   background: #fff4f4;
   color: #b00020;

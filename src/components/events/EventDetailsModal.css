@@ -113,3 +113,26 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+.event-details-actions button.secondary {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.event-details-actions.wrap {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.event-details-confirm {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.event-details-confirm p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text);
+}
