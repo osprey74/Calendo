@@ -1,8 +1,8 @@
 # HANDOFF.md — Calendo
 
-**最終更新**: 2026-05-06
+**最終更新**: 2026-05-10
 **バージョン**: v0.1.0（開発中）
-**フェーズ**: Phase 4.2（繰り返し予定の作成 UI）— 全 3 ソースで RRULE プリセットからの作成に対応。編集時の RRULE 変更と「この日以降すべて」スコープは Phase 5+ に先送り
+**フェーズ**: Phase 5（リリース準備）— バージョン確定・Cargo.lock 再生成・README/リリースノート整備完了。残: コミット＆プッシュ → タグプッシュ → CI/CD ビルド → Release 公開
 
 ---
 
@@ -96,8 +96,8 @@ gh secret set GOOGLE_CLIENT_SECRET --repo osprey74/Calendo
 - [x] `.env.example` 設計（`MS_CLIENT_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`）
 - [x] `.gitignore` / `LICENSE`（MIT）/ `README.md` / `README.ja.md` 配置
 - [x] CI/CD ワークフロー配置（`.github/workflows/release.yml` タグプッシュ自動ビルド + `ci.yml` PR テスト）
-- [ ] GitHub Secrets 登録（`MS_CLIENT_ID` / `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`）
-- [ ] ローカル `.env` 作成（実値記入）
+- [x] GitHub Secrets 登録（`MS_CLIENT_ID` / `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`）— 2026-04-27 登録済み
+- [x] ローカル `.env` 作成（実値記入）— 2026-04-27 作成済み
 
 ### Phase 1：認証・接続確立（MVP 前提）
 
@@ -299,11 +299,14 @@ gh secret set GOOGLE_CLIENT_SECRET --repo osprey74/Calendo
 
 ### Phase 5：リリース準備
 
-- [ ] バージョン v0.1.0 確定 → `package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json` 更新
-- [ ] `Cargo.lock` 再生成（`cargo generate-lockfile`）
-- [ ] README.md / README.ja.md 作成
-- [ ] CI/CD（GitHub Actions: Windows x86_64 + macOS universal、タグプッシュ自動ビルド）
-- [ ] リリースノート（EN/JA）
+- [x] バージョン v0.1.0 確定 → `package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json` すべて `0.1.0`
+- [x] `Cargo.lock` 再生成（`cargo generate-lockfile`、2026-05-10）
+- [x] README.md / README.ja.md を v0.1.0 リリース向けに書き直し（機能リスト・OAuth セットアップ・開発／ビルド手順）
+- [x] CI/CD（GitHub Actions: Windows x86_64 + macOS universal、タグプッシュ自動ビルド）— `.github/workflows/release.yml` 配置済み
+- [x] リリースノート（EN/JA）— [RELEASE_NOTES_v0.1.0.md](RELEASE_NOTES_v0.1.0.md)
+- [ ] コミット＆プッシュ（メインブランチ）
+- [ ] `v0.1.0` タグ作成・プッシュ → CI/CD で Windows / macOS バイナリ自動ビルド＆ Release ドラフト生成
+- [ ] GitHub Release ページ用リリースノート（EN/JA）を生成 → ドラフトに添付して公開
 
 ---
 
