@@ -2,7 +2,7 @@
 
 **最終更新**: 2026-05-10
 **バージョン**: v0.1.0（開発中）
-**フェーズ**: Phase 5（リリース準備）— バージョン確定・Cargo.lock 再生成・README/リリースノート整備完了。残: コミット＆プッシュ → タグプッシュ → CI/CD ビルド → Release 公開
+**フェーズ**: **v0.1.0 公開完了**（2026-05-10）— https://github.com/osprey74/Calendo/releases/tag/v0.1.0 。次フェーズ以降の課題は本ドキュメント末尾「Phase 5 持ち越し」を参照
 
 ---
 
@@ -304,9 +304,15 @@ gh secret set GOOGLE_CLIENT_SECRET --repo osprey74/Calendo
 - [x] README.md / README.ja.md を v0.1.0 リリース向けに書き直し（機能リスト・OAuth セットアップ・開発／ビルド手順）
 - [x] CI/CD（GitHub Actions: Windows x86_64 + macOS universal、タグプッシュ自動ビルド）— `.github/workflows/release.yml` 配置済み
 - [x] リリースノート（EN/JA）— [RELEASE_NOTES_v0.1.0.md](RELEASE_NOTES_v0.1.0.md)
-- [ ] コミット＆プッシュ（メインブランチ）
-- [ ] `v0.1.0` タグ作成・プッシュ → CI/CD で Windows / macOS バイナリ自動ビルド＆ Release ドラフト生成
-- [ ] GitHub Release ページ用リリースノート（EN/JA）を生成 → ドラフトに添付して公開
+- [x] コミット＆プッシュ（メインブランチ）— `e26a4b7`（Phase 5 prep）+ `e08957f`（Tauri NPM bump）
+- [x] `v0.1.0` タグ作成・プッシュ → CI/CD で Windows / macOS バイナリ自動ビルド＆ Release ドラフト生成（Run `25623864547`、8m25s）
+- [x] GitHub Release ページ用リリースノート（EN/JA）を生成 → ドラフトに添付して公開（2026-05-10 08:39 UTC）
+
+#### Phase 5 実装メモ
+
+- **初回ビルド失敗と再起動**: 1 回目のタグプッシュで Tauri バージョン不整合（NPM `@tauri-apps/api@2.10.1` vs Rust `tauri@2.11.1`）によりビルド失敗。`@tauri-apps/api`/`cli`/`plugin-store` を `^2.11` に明示ピン → `package-lock.json` 再生成 → `v0.1.0` タグを削除・再プッシュで解決
+- **配布アセット**: Windows NSIS (`x64-setup.exe`) / Windows MSI (`x64_en-US.msi`) / macOS DMG (`universal.dmg`) / macOS app tarball (`universal.app.tar.gz`) の 4 種
+- **GitHub Release ページのリリースノート**: `RELEASE_NOTES_v0.1.0.md`（リポジトリ内のフル版）と Release ページ本文（コンパクト版＋ダウンロードテーブル）を分離。Release ページ本文は EN→JA 順、ダウンロード一覧と既知の制限を強調
 
 ---
 
