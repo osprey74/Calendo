@@ -293,9 +293,57 @@ gh secret set GOOGLE_CLIENT_SECRET --repo osprey74/Calendo
 - [ ] 編集モードでの RRULE 変更 UI（プリセット逆引き＋カスタム RRULE エディタ）
 - [ ] 「この日以降すべて」スコープ — Graph/GCal で単一 API 呼び出し不可。マスタ recurrence range 終端付け替え＋新シリーズ作成の複合操作が必要
 - [ ] CalDAV 繰り返しの「この1件のみ」: `RECURRENCE-ID` 付き VEVENT 部分上書き、`EXDATE` 追記による単一インスタンス削除
-- [ ] エラーハンドリング全網羅（DESIGN.md「エラーハンドリング方針」表）— 現状は Toast にエラー文字列を投げるのみ
-- [ ] SettingsModal でサブカレンダーの色・ラベル上書き（カスタマイズ）
+- [x] エラーハンドリング全網羅（DESIGN.md「エラーハンドリング方針」表）— 2026-05-13 実装
+- [x] SettingsModal でサブカレンダーの色・ラベル上書き（カスタマイズ） — 2026-05-13 実装
 - [ ] イベントのソース／カレンダー間移動（現状: 削除＋再作成）
+
+#### Phase 5.1 実装メモ — 色・ラベル上書き（2026-05-13）
+
+- **永続化**: `calendarOverrides: Record<\`${sourceId}|${calendarId}\`, { color?, label? }>` を Tauri store の `calendarOverrides` キーに保存（[persistence.ts](src/lib/persistence.ts) `saveCalendarOverrides`）。空オブジェクトはストアから削除し、`hasOverride` 検出を正確に保つ
+- **適用**: 描画時のセレクタで合成。`effectiveCalendarColor()` / `effectiveCalendarName()` を [calendarStore.ts](src/store/calendarStore.ts) に追加し、CalendarSidebar / EventBlock / EventDetailsModal で provider 値の代わりに使用。CalendarMeta 自体は不変（provider 値を保持）
+- **UI**: 既存 ConnectionPanel をタブ化。新規 [SettingsModal.tsx](src/components/settings/SettingsModal.tsx) が「アカウント接続」「表示設定」の 2 タブを切り替え、ConnectionPanelContent / DisplayPanelContent を埋め込む。ラベル入力は local state にバッファし blur / Enter で commit（毎打鍵で永続化しないため打鍵レスポンスが軽快）
+- **リセット**: 行ごとの「リセット」ボタンで両フィールドを削除し provider 値に戻す。color 単独・label 単独の片方リセットは Phase 5 では未対応（UX 上の複雑度を回避）
+
+#### Phase 5.3 実装メモ — 時間軸ズーム（2026-05-13）
+
+- **ズームレベル**: 1時間あたりの px を 8 段階のプリセット `[40, 60, 80, 100, 120, 160, 200, 240]`（60 が既定 = 旧固定値）。120 を境にステップが粗くなり、最大 240px まで到達。任意値で保存されても起動時に最近接プリセットへスナップ
+- **状態**: [calendarStore.ts](src/store/calendarStore.ts) に `hourHeightPx` を追加、`setHourHeightPx(px)` / `stepHourHeight(±1)` を公開。Tauri store の `hourHeightPx` キーに永続化（[persistence.ts](src/lib/persistence.ts) `saveHourHeightPx`）
+- **適用**: [TimeGrid.css](src/components/views/TimeGrid.css) の `.time-grid` を `calc(var(--hour-px, 60px) * 24)` 化。DayView / WeekView の `.time-grid-scroll` に `style={{ "--hour-px": "{n}px" }}` を inline 注入（動的 CSS 変数のため inline 必須）。HourGutter / HourLines / EventBlock は既に絶対位置・パーセンテージ計算なので追加変更不要
+- **UI**: [TopBar.tsx](src/components/layout/TopBar.tsx) 右側に `−` / `60px` / `＋` のズームコントロールを追加。両端で disabled。`role="group"` ＋ `aria-label="時間軸の高さ"`
+- **既定値リセット**: 中央の px 表示がボタンになっており、クリックで `DEFAULT_HOUR_HEIGHT_PX`（60）に戻る。既定値のときは disabled。`title` に「クリックで既定（60px）に戻す」を表示
+
+#### Phase 5.4 実装メモ — 表示時間範囲（2026-05-13）
+
+- **状態**: `viewStartHour` (0-23, 既定 0) / `viewEndHour` (1-24, 既定 24) を [calendarStore.ts](src/store/calendarStore.ts) に追加。`setViewHours(start, end)` で同時更新（inverted/empty な値は silently 棄却）。Tauri store の `viewStartHour` / `viewEndHour` に永続化（[persistence.ts](src/lib/persistence.ts) `saveViewHours`）
+- **レイアウト計算**: [eventUtils.ts](src/utils/eventUtils.ts) を内部関数 `eventDayMinutes` と公開関数 `dayBlockLayout(e, day, visStart, visEnd)` に分離。dayBlockLayout は ウィンドウに対する％を返し、ウィンドウ外イベントは端でクリップ。`partitionDay(events, day, visStart, visEnd)` がウィンドウに重ならない timed イベントを事前除外して `assignLanes` に渡すため、非表示イベントが可視イベントのレーン幅を奪う問題を回避
+- **描画**: [HourGutter / HourLines](src/components/views/DayView.tsx) に `startHour` / `endHour` props を追加し、可視時間帯ぶんだけ繰り返し。DayView / WeekView から store の値を渡す。EventBlock も同 props を受け取り、layout クリップを実施
+- **CSS**: `--visible-hours` を `.time-grid-scroll` に inline 注入（DayView / WeekView）。`.time-grid` 高さは [TimeGrid.css](src/components/views/TimeGrid.css) で `calc(var(--hour-px) * 24)` のまま（HourGutter / HourLines が flex:1 で要素数に応じて分割するため、要素数を可視時間数にすれば 1 時間あたりの実 px は `var(--hour-px) * 24 / visibleHours` になる）。※ 将来 1 時間 = 厳密に hourHeightPx にしたい場合は `--visible-hours` を用いて高さ計算式を変える余地あり
+- **UI**: [DisplayPanel.tsx](src/components/settings/DisplayPanel.tsx) に `TimeRangeSection` を追加。開始 (0:00-23:00) / 終了 (1:00-24:00) のドロップダウン＋リセットボタン。終了値が開始以下になる選択時は自動的に start+1 / end-1 に補正（inverted を UI で発生させない）。設定モーダル「表示設定」タブの先頭に配置
+- **終日イベント**: 表示範囲を狭めても影響を受けない（all-day bar は別レイアウト）。timed イベントのみがクリップ対象
+
+#### Phase 5.5 実装メモ — 現在時刻インジケーター（2026-05-13）
+
+- **コンポーネント**: 新規 [NowLine.tsx](src/components/views/NowLine.tsx)。`visibleStartHour` / `visibleEndHour` / `todayColumnIndex` / `columnCount` を受け取り、現在時刻が可視ウィンドウ内かつ今日が表示範囲内のときに限り赤い水平線と小さな丸印を描画。`setInterval(30s)` で再描画
+- **配置**: DayView では `.day-column` の中（columnCount=1）、WeekView では `.week-columns` の中（columnCount=7）に直接マウント。どちらも `position: relative` なので `left: 0; right: 0` で親いっぱいに広がる。WeekView では HourGutter は別兄弟なので、線はガター以外の 7 日カラム横断
+- **位置計算**: `nowMin = h*60 + m + s/60`（秒も使い視覚ジッタを抑制）。`topPct = ((nowMin - visStart) / visSpan) * 100`。ドットは `todayColumnIndex / columnCount` × 100% に絶対位置（`transform: translate(-50%, -50%)` で中央寄せ）
+- **CSS**: [TimeGrid.css](src/components/views/TimeGrid.css) に `.now-line`（赤 2px ライン、z-index:2）と `.now-dot`（赤 10px 丸、z-index:3、`box-shadow: 0 0 0 1px surface` でイベントブロック上でも視認性確保）
+- **非表示条件**: ① 今日が表示中の週／日に含まれない（`todayColumnIndex < 0`） ② 現在時刻が `[visibleStartHour, visibleEndHour)` の外
+
+#### Phase 5.2 実装メモ — エラーハンドリング全網羅（2026-05-13）
+
+- **Backend AppError 構造化**: [error.rs](src-tauri/src/error.rs) `Serialize` を `{kind, message, status?, sourceId?}` 形式に変更。`kind()` / `status()` / `source_id()` のヘルパーで各バリアントを分類。安定した kind 文字列（`auth_required` / `network` / `permission` / `not_found` / `conflict` / `rate_limit` / `server` / ...）をフロントの switch 文と契約として固定
+- **HTTP 分類**: 新規バリアント `HttpStatus { status, message }` を導入し、CalDAV の各書き込み・読み込みパス（[caldav.rs](src-tauri/src/calendars/caldav.rs)）で個別 401 を `AuthRequired("icloud")` に切り出し、それ以外の 4xx/5xx を `HttpStatus` に分類。Graph/GCal は既存の `error_for_status()` 経由で `AppError::Http(reqwest)` のまま流れるが、`kind()` が reqwest::Error の status を見て同じ kind 文字列を返す
+- **トークンリフレッシュの再失敗**: [oauth.rs](src-tauri/src/auth/oauth.rs) `send_with_refresh` が refresh 後の 2 度目も 401 だった場合に `AppError::AuthRequired(source_id)` を返す（refresh は succeed したが新トークンも reject = 再認証が必要）。サーバ側 token revoke 後・アプリ側で `token_for_user` を強制無効化したケース等に対応
+- **events_fetch warnings**: 戻り型を `EventsFetchResult { events, warnings: Vec<FetchWarning> }` に変更（[calendar_commands.rs](src-tauri/src/commands/calendar_commands.rs) / [models.rs](src-tauri/src/models.rs)）。per-source / per-calendar のスキップ事由（auth_required / 4xx / caldav パース失敗）を `{sourceId, calendarId?, kind, message}` として集約し、フロントが Toast にまとめて表示。`is_disconnected_source` は `AuthRequired` も含めるので個別ソースの認証切れがあっても他ソースのフェッチを妨げない
+- **Frontend classifier**: 新規 [lib/errors.ts](src/lib/errors.ts) の `classifyError(unknown): ClassifiedError` が Tauri の reject ペイロード（structured / 文字列 / Error）を吸収して `{kind, status?, sourceId?, userMessage}` を返す。`userMessage` は日本語ローカライズ済みでそのまま Toast / モーダル表示可能。`isAuthRequired()` も公開
+- **catch サイトの全置換**: `String(e)` パターンを全 6 箇所で classifyError 経由に置換：[calendarStore.ts](src/store/calendarStore.ts)（loadCalendars / loadEvents / createEvent / updateEvent / deleteEvent）、[ConnectionPanel.tsx](src/components/settings/ConnectionPanel.tsx)（status / connect / disconnect）、[EventModal.tsx](src/components/events/EventModal.tsx)、[EventDetailsModal.tsx](src/components/events/EventDetailsModal.tsx)
+- **UX 動作**:
+  - **トークン期限切れ**: `send_with_refresh` 自動リトライ→失敗時に `auth_required` Toast「{ソース}：認証期限が切れました。設定から再ログインしてください。」
+  - **ネットワークエラー**: 既存の events 配列を保持したまま（cache clobber しない）、Toast に「ネットワークエラーが発生しました。接続を確認して再試行してください。」
+  - **CalDAV 認証失敗**: 401 → `AuthRequired("icloud")` → Toast。設定モーダルから再入力可能
+  - **イベント作成失敗**: モーダルを閉じず入力保持。`error` フィールドに日本語メッセージ
+  - **削除時の 404**: 他のクライアントで既に削除済みのケースは「対象は既に削除されていました」を info Toast で表示し成功扱い（ユーザの意図は満たされている）
+  - **fetch 警告集約**: 同一 source+kind の warnings は 1 Toast に dedup。`not_authenticated`（未接続ソース）は静かに無視（毎回 Toast が出るのを回避）
 
 ### Phase 5：リリース準備
 
@@ -401,11 +449,11 @@ calendo/
 
 ## 未決事項（DESIGN.md より転記）
 
-- [ ] 通知・リマインダー機能の要否
-- [ ] ウィンドウサイズ・最小サイズの決定
-- [ ] macOS / Windows 両対応の動作確認環境
-- [ ] CLAUDE.md の起票（Phase 1 開始時）
-- [ ] アイコン素材の準備
+- [x] 通知・リマインダー機能の要否 — **不要**（2026-05-13 決定）
+- [x] ウィンドウサイズ・最小サイズの決定 — **1280×800**（2026-05-13 決定）
+- [x] macOS / Windows 両対応の動作確認環境 — **両 OS とも実機で確認可能**（2026-05-13）
+- [x] CLAUDE.md の起票 — Phase 1 時点で配置済み（[CLAUDE.md](CLAUDE.md)）
+- [x] アイコン素材の準備 — Phase 4.0 で配置済み（[src-tauri/icons/](src-tauri/icons/)）
 
 ---
 

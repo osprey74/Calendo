@@ -1,8 +1,8 @@
 use crate::calendars;
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    CalendarMeta, CalendarSourceId, EventDraft, EventUpdateRequest, RecurringEditScope,
-    UnifiedEvent,
+    CalendarMeta, CalendarSourceId, EventDraft, EventUpdateRequest, EventsFetchResult,
+    FetchWarning, RecurringEditScope, UnifiedEvent,
 };
 use std::collections::HashMap;
 
@@ -26,15 +26,20 @@ pub async fn calendars_fetch(source_id: String) -> AppResult<Vec<CalendarMeta>> 
 ///
 /// Per-calendar failures (4xx, CalDAV malformed responses) are logged and skipped so a
 /// single broken calendar doesn't suppress the rest. Whole-source auth/network failures
-/// still propagate so the UI can prompt re-auth.
+/// are converted into `FetchWarning`s so the UI can show "Microsoft 365 の認証が切れて
+/// います" without aborting the rest of the fetch.
+///
+/// Truly catastrophic errors (UnknownSource, unexpected variants) still propagate as
+/// errors so the user sees them in the toast layer.
 #[tauri::command]
 pub async fn events_fetch(
     source_ids: Vec<String>,
     calendar_ids: Option<HashMap<String, Vec<String>>>,
     date_from: String,
     date_to: String,
-) -> AppResult<Vec<UnifiedEvent>> {
+) -> AppResult<EventsFetchResult> {
     let mut events: Vec<UnifiedEvent> = Vec::new();
+    let mut warnings: Vec<FetchWarning> = Vec::new();
 
     for source_str in source_ids {
         let source_id = parse_source(&source_str)?;
@@ -48,11 +53,13 @@ pub async fn events_fetch(
                 Ok(list) => list.into_iter().map(|c| c.id).collect(),
                 Err(e) if is_disconnected_source(&e) => {
                     log::warn!("skipping disconnected source {source_id:?}: {e}");
+                    warnings.push(make_warning(&source_str, None, &e));
                     continue;
                 }
                 Err(e) => {
                     if is_recoverable_per_calendar(&e) {
                         log::warn!("calendars_fetch failed for {source_id:?}: {e}");
+                        warnings.push(make_warning(&source_str, None, &e));
                         continue;
                     }
                     return Err(e);
@@ -71,6 +78,7 @@ pub async fn events_fetch(
                     log::warn!(
                         "source {source_id:?} disconnected mid-fetch; skipping rest: {e}"
                     );
+                    warnings.push(make_warning(&source_str, None, &e));
                     source_disconnected = true;
                 }
                 Err(e) => {
@@ -78,6 +86,7 @@ pub async fn events_fetch(
                         log::warn!(
                             "events fetch failed for {source_id:?} calendar {cal_id}: {e}"
                         );
+                        warnings.push(make_warning(&source_str, Some(cal_id.clone()), &e));
                         continue;
                     }
                     return Err(e);
@@ -87,30 +96,48 @@ pub async fn events_fetch(
     }
 
     events.sort_by(|a, b| a.start.cmp(&b.start));
-    Ok(events)
+    Ok(EventsFetchResult { events, warnings })
 }
 
-/// True when the error is plausibly per-calendar (HTTP 4xx) rather than a global auth or
-/// network outage. Auth/network errors should still propagate so the UI can react.
+fn make_warning(source_id: &str, calendar_id: Option<String>, err: &AppError) -> FetchWarning {
+    FetchWarning {
+        source_id: source_id.to_string(),
+        calendar_id,
+        kind: err.kind().to_string(),
+        message: err.to_string(),
+    }
+}
+
+/// True when the error is plausibly per-calendar (HTTP 4xx response, CalDAV body parse
+/// glitch) rather than a global auth or network outage. Auth/network errors should still
+/// propagate so the UI can react.
+///
+/// 401/auth-required is NOT recoverable here — it means the whole source is in trouble,
+/// not just one calendar. We let it propagate via `is_disconnected_source` instead.
 fn is_recoverable_per_calendar(e: &AppError) -> bool {
     match e {
         AppError::Http(err) => err
             .status()
-            .map(|s| s.is_client_error())
+            .map(|s| s.is_client_error() && s.as_u16() != 401)
             .unwrap_or(false),
+        AppError::HttpStatus { status, .. } => (400..500).contains(status) && *status != 401,
         AppError::CalDav(_) => true,
         _ => false,
     }
 }
 
-/// True when the source's auth is gone (revoked, never set, or refresh expired). The UI
-/// already tracks per-source connection state via `auth_status`, so events_fetch should
-/// silently skip these rather than erroring the whole fetch — otherwise disconnecting
-/// one source poisons the view for the others that are still connected.
+/// True when the source's auth is gone (revoked, never set, refresh expired, or
+/// re-auth required). The UI already tracks per-source connection state via
+/// `auth_status`, so events_fetch should silently skip these rather than erroring the
+/// whole fetch — otherwise disconnecting one source poisons the view for the others
+/// that are still connected. Note: `AuthRequired` *is* surfaced (propagated) when it
+/// comes from `event_create/update/delete` directly because those are foreground user
+/// actions where the user expects feedback; the per-calendar enumeration path is the
+/// only place we skip.
 fn is_disconnected_source(e: &AppError) -> bool {
     matches!(
         e,
-        AppError::NotAuthenticated(_) | AppError::TokenExpired
+        AppError::NotAuthenticated(_) | AppError::TokenExpired | AppError::AuthRequired(_)
     )
 }
 

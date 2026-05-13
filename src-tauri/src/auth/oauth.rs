@@ -246,8 +246,12 @@ pub async fn ensure_fresh(source_id: CalendarSourceId) -> AppResult<StoredTokens
 ///
 /// `build_req` is invoked with the current access token. If the server replies 401
 /// (token revoked, clock skew, or just-rotated), we refresh once and rebuild the request
-/// with the new token. The closure is `Fn` rather than `FnOnce` because reqwest's
-/// `RequestBuilder` isn't `Clone` — re-issuing the request requires reconstructing it.
+/// with the new token. If the second response is still 401 — i.e., refresh succeeded
+/// but the new access token also got rejected — we surface `AppError::AuthRequired` so
+/// the UI can prompt re-authentication for that specific source.
+///
+/// The closure is `Fn` rather than `FnOnce` because reqwest's `RequestBuilder` isn't
+/// `Clone` — re-issuing the request requires reconstructing it.
 pub async fn send_with_refresh<F>(
     source_id: CalendarSourceId,
     build_req: F,
@@ -262,6 +266,14 @@ where
     }
     // Drain the 401 body so the connection can be returned to the pool cleanly.
     let _ = resp.bytes().await;
+    // Refresh failures themselves are already structured (TokenExpired / NotAuthenticated
+    // / OAuth) — propagate as-is so the frontend can distinguish "refresh impossible"
+    // from "refresh ok but server still says no".
     let refreshed = refresh(source_id).await?;
-    Ok(build_req(&refreshed.access_token).send().await?)
+    let retry = build_req(&refreshed.access_token).send().await?;
+    if retry.status().as_u16() == 401 {
+        let _ = retry.bytes().await;
+        return Err(AppError::AuthRequired(source_id.as_str().into()));
+    }
+    Ok(retry)
 }

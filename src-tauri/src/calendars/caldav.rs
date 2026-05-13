@@ -42,10 +42,19 @@ async fn caldav_request(
     let text = resp.text().await?;
 
     if status.as_u16() != 207 && !status.is_success() {
-        return Err(AppError::CalDav(format!(
-            "{method} {url} → {status} (final {final_url}) body={}",
-            truncate(&text, 300)
-        )));
+        // 401 against CalDAV means the stored app-specific password is no longer valid
+        // (revoked from appleid.apple.com or rotated). Surface as AuthRequired so the
+        // frontend can prompt the user to re-enter credentials for iCloud specifically.
+        if status.as_u16() == 401 {
+            return Err(AppError::AuthRequired("icloud".into()));
+        }
+        return Err(AppError::HttpStatus {
+            status: status.as_u16(),
+            message: format!(
+                "{method} {url} → {status} (final {final_url}) body={}",
+                truncate(&text, 300)
+            ),
+        });
     }
     Ok(text)
 }
@@ -484,13 +493,16 @@ async fn put_ics(creds: &ICloudCredentials, url: &str, ics: &str, expect_new: bo
         req = req.header("If-None-Match", "*");
     }
     let resp = req.send().await?;
-    if !resp.status().is_success() {
-        let status = resp.status();
+    let status = resp.status();
+    if !status.is_success() {
+        if status.as_u16() == 401 {
+            return Err(AppError::AuthRequired("icloud".into()));
+        }
         let text = resp.text().await.unwrap_or_default();
-        return Err(AppError::CalDav(format!(
-            "PUT {url} → {status}: {}",
-            truncate(&text, 300)
-        )));
+        return Err(AppError::HttpStatus {
+            status: status.as_u16(),
+            message: format!("PUT {url} → {status}: {}", truncate(&text, 300)),
+        });
     }
     Ok(())
 }
@@ -504,11 +516,17 @@ async fn fetch_existing_ics(creds: &ICloudCredentials, url: &str) -> AppResult<S
         .basic_auth(&creds.apple_id, Some(&creds.app_password))
         .send()
         .await?;
-    if !resp.status().is_success() {
-        return Err(AppError::CalDav(format!(
-            "GET {url} → {} (cannot read existing event for update)",
-            resp.status()
-        )));
+    let status = resp.status();
+    if !status.is_success() {
+        if status.as_u16() == 401 {
+            return Err(AppError::AuthRequired("icloud".into()));
+        }
+        return Err(AppError::HttpStatus {
+            status: status.as_u16(),
+            message: format!(
+                "GET {url} → {status} (cannot read existing event for update)"
+            ),
+        });
     }
     Ok(resp.text().await?)
 }
@@ -608,9 +626,13 @@ pub async fn delete_event(source_id: CalendarSourceId, event_id: &str) -> AppRes
     let status = resp.status();
     // 404 is acceptable for delete (someone else removed it; goal achieved).
     if !status.is_success() && status.as_u16() != 404 {
-        return Err(AppError::CalDav(format!(
-            "DELETE {resource_url} → {status}"
-        )));
+        if status.as_u16() == 401 {
+            return Err(AppError::AuthRequired("icloud".into()));
+        }
+        return Err(AppError::HttpStatus {
+            status: status.as_u16(),
+            message: format!("DELETE {resource_url} → {status}"),
+        });
     }
     Ok(())
 }

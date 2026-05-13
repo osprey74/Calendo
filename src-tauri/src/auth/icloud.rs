@@ -36,12 +36,15 @@ pub async fn verify(creds: &ICloudCredentials) -> AppResult<()> {
     if status.as_u16() == 207 || status.is_success() {
         Ok(())
     } else if status.as_u16() == 401 {
-        Err(AppError::CalDav("iCloud authentication failed (401)".into()))
+        // Wrong Apple ID / app-specific password / revoked password — the user needs to
+        // re-enter credentials, not retry the same request.
+        Err(AppError::AuthRequired("icloud".into()))
     } else {
         let text = resp.text().await.unwrap_or_default();
-        Err(AppError::CalDav(format!(
-            "iCloud PROPFIND returned {status}: {text}"
-        )))
+        Err(AppError::HttpStatus {
+            status: status.as_u16(),
+            message: format!("iCloud PROPFIND returned {status}: {text}"),
+        })
     }
 }
 

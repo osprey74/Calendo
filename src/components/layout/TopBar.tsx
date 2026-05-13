@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { useCalendarStore } from "../../store/calendarStore";
+import {
+  DEFAULT_HOUR_HEIGHT_PX,
+  HOUR_HEIGHT_LEVELS,
+  useCalendarStore,
+} from "../../store/calendarStore";
 import {
   formatDateHeading,
   formatWeekHeading,
@@ -15,6 +19,13 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const shiftAnchor = useCalendarStore((s) => s.shiftAnchor);
   const goToToday = useCalendarStore((s) => s.goToToday);
   const loading = useCalendarStore((s) => s.loading);
+  const hourHeightPx = useCalendarStore((s) => s.hourHeightPx);
+  const stepHourHeight = useCalendarStore((s) => s.stepHourHeight);
+  const setHourHeightPx = useCalendarStore((s) => s.setHourHeightPx);
+
+  const minHourPx = HOUR_HEIGHT_LEVELS[0];
+  const maxHourPx = HOUR_HEIGHT_LEVELS[HOUR_HEIGHT_LEVELS.length - 1];
+  const isDefaultZoom = hourHeightPx === DEFAULT_HOUR_HEIGHT_PX;
 
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -75,6 +86,42 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
 
         <div className="topbar-right">
           {loading && <span className="loading-tag">読み込み中…</span>}
+          <div className="zoom-control" role="group" aria-label="時間軸の高さ">
+            <button
+              type="button"
+              className="zoom-btn"
+              onClick={() => stepHourHeight(-1)}
+              disabled={hourHeightPx <= minHourPx}
+              title="時間軸を縮める"
+              aria-label="時間軸を縮める"
+            >
+              −
+            </button>
+            <button
+              type="button"
+              className="zoom-value"
+              onClick={() => setHourHeightPx(DEFAULT_HOUR_HEIGHT_PX)}
+              disabled={isDefaultZoom}
+              title={
+                isDefaultZoom
+                  ? `1時間あたり ${hourHeightPx}px（既定）`
+                  : `1時間あたり ${hourHeightPx}px ・ クリックで既定（${DEFAULT_HOUR_HEIGHT_PX}px）に戻す`
+              }
+              aria-label={`1時間あたり ${hourHeightPx}px。クリックで既定値に戻す`}
+            >
+              {hourHeightPx}px
+            </button>
+            <button
+              type="button"
+              className="zoom-btn"
+              onClick={() => stepHourHeight(1)}
+              disabled={hourHeightPx >= maxHourPx}
+              title="時間軸を伸ばす"
+              aria-label="時間軸を伸ばす"
+            >
+              ＋
+            </button>
+          </div>
           <button
             type="button"
             className="create-btn"

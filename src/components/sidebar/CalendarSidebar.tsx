@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import {
+  effectiveCalendarColor,
+  effectiveCalendarName,
   isCalendarEnabledIn,
   useCalendarStore,
 } from "../../store/calendarStore";
@@ -11,6 +13,7 @@ export function CalendarSidebar() {
   const calendars = useCalendarStore((s) => s.calendars);
   const sourceEnabled = useCalendarStore((s) => s.sourceEnabled);
   const calendarEnabled = useCalendarStore((s) => s.calendarEnabled);
+  const calendarOverrides = useCalendarStore((s) => s.calendarOverrides);
   const toggleSource = useCalendarStore((s) => s.toggleSource);
   const toggleCalendar = useCalendarStore((s) => s.toggleCalendar);
   const setAllCalendarsEnabled = useCalendarStore((s) => s.setAllCalendarsEnabled);
@@ -103,8 +106,8 @@ export function CalendarSidebar() {
                     <CalendarRow
                       key={c.id}
                       sourceColor={s.color}
-                      name={c.name}
-                      color={c.color}
+                      name={effectiveCalendarName(c, calendarOverrides, c.name)}
+                      color={effectiveCalendarColor(c, calendarOverrides, s.color)}
                       isWritable={c.isWritable}
                       isPrimary={c.isPrimary}
                       enabled
@@ -139,8 +142,8 @@ export function CalendarSidebar() {
                           <CalendarRow
                             key={c.id}
                             sourceColor={s.color}
-                            name={c.name}
-                            color={c.color}
+                            name={effectiveCalendarName(c, calendarOverrides, c.name)}
+                            color={effectiveCalendarColor(c, calendarOverrides, s.color)}
                             isWritable={c.isWritable}
                             isPrimary={c.isPrimary}
                             enabled={false}

@@ -5,7 +5,7 @@ import { CalendarSidebar } from "../sidebar/CalendarSidebar";
 import { DayView } from "../views/DayView";
 import { WeekView } from "../views/WeekView";
 import { TopBar } from "./TopBar";
-import { ConnectionPanel } from "../settings/ConnectionPanel";
+import { SettingsModal } from "../settings/SettingsModal";
 import { ToastHost } from "../toast/ToastHost";
 import "./AppShell.css";
 
@@ -65,7 +65,7 @@ export function AppShell() {
           {view === "day" ? <DayView /> : <WeekView />}
         </main>
       </div>
-      {settingsOpen && <ConnectionPanel onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       <ToastHost />
     </div>
   );

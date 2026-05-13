@@ -1,7 +1,12 @@
 import { useState } from "react";
 import type { CalendarSourceId, RecurringEditScope, UnifiedEvent } from "../../types";
 import { DEFAULT_SOURCES } from "../../types";
-import { useCalendarStore } from "../../store/calendarStore";
+import {
+  effectiveCalendarColor,
+  effectiveCalendarName,
+  useCalendarStore,
+} from "../../store/calendarStore";
+import { classifyError } from "../../lib/errors";
 import { allDayEndInclusive, eventStart, eventEnd } from "../../utils/eventUtils";
 import { formatDateHeading, formatTimeShort, isSameDay } from "../../utils/dateUtils";
 import { EventModal } from "./EventModal";
@@ -19,10 +24,12 @@ export function EventDetailsModal({
   onClose: () => void;
 }) {
   const calendars = useCalendarStore((s) => s.calendars);
+  const calendarOverrides = useCalendarStore((s) => s.calendarOverrides);
   const deleteEvent = useCalendarStore((s) => s.deleteEvent);
   const source = DEFAULT_SOURCES.find((s) => s.id === event.sourceId);
   const calendar = calendars[event.sourceId]?.find((c) => c.id === event.calendarId);
-  const calendarColor = calendar?.color ?? source?.color ?? "#888";
+  const calendarColor = effectiveCalendarColor(calendar, calendarOverrides, source?.color ?? "#888");
+  const calendarDisplayName = effectiveCalendarName(calendar, calendarOverrides, "(取得済み一覧外)");
 
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -54,7 +61,7 @@ export function EventDetailsModal({
       await deleteEvent(event.sourceId, event.calendarId, targetId, scope);
       onClose();
     } catch (e) {
-      setActionError(String(e));
+      setActionError(classifyError(e).userMessage);
     } finally {
       setDeleting(false);
     }
@@ -89,7 +96,7 @@ export function EventDetailsModal({
 
           <Row label="カレンダー">
             <span className="cal-pill" style={{ borderLeftColor: calendarColor }}>
-              {calendar?.name ?? "(取得済み一覧外)"}
+              {calendarDisplayName}
               {calendar?.isPrimary && <span className="primary-tag"> primary</span>}
             </span>
             {!calendar?.isWritable && calendar !== undefined && (

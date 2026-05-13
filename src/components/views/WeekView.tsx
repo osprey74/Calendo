@@ -1,10 +1,12 @@
 import { useMemo } from "react";
+import type { CSSProperties } from "react";
 import { filterVisible, useCalendarStore } from "../../store/calendarStore";
 import { addDays, formatWeekdayShort, isSameDay, startOfWeekJst } from "../../utils/dateUtils";
 import { assignLanes, partitionDay } from "../../utils/eventUtils";
 import { AllDayBar } from "../events/AllDayBar";
 import { EventBlock } from "../events/EventBlock";
 import { HourGutter, HourLines } from "./DayView";
+import { NowLine } from "./NowLine";
 import "./TimeGrid.css";
 
 export function WeekView() {
@@ -12,6 +14,9 @@ export function WeekView() {
   const events = useCalendarStore((s) => s.events);
   const sourceEnabled = useCalendarStore((s) => s.sourceEnabled);
   const calendarEnabled = useCalendarStore((s) => s.calendarEnabled);
+  const hourHeightPx = useCalendarStore((s) => s.hourHeightPx);
+  const viewStartHour = useCalendarStore((s) => s.viewStartHour);
+  const viewEndHour = useCalendarStore((s) => s.viewEndHour);
 
   const visible = useMemo(
     () => filterVisible(events, sourceEnabled, calendarEnabled),
@@ -25,10 +30,16 @@ export function WeekView() {
   );
 
   const today = new Date();
+  const visibleHours = viewEndHour - viewStartHour;
+  const scrollStyle = {
+    ["--hour-px" as never]: `${hourHeightPx}px`,
+    ["--visible-hours" as never]: visibleHours,
+  } as CSSProperties;
+  const todayColumnIndex = days.findIndex((d) => isSameDay(d, today));
 
   return (
     <div className="week-view">
-      <div className="time-grid-scroll">
+      <div className="time-grid-scroll" style={scrollStyle}>
         <div className="week-sticky-top">
           <div className="week-header">
             <div className="week-header-gutter" />
@@ -46,6 +57,8 @@ export function WeekView() {
           <div className="week-allday-row">
             <div className="week-allday-gutter">終日</div>
             {days.map((d) => {
+              // All-day bar uses the full-day partition so visibility-window changes
+              // don't hide all-day events.
               const split = partitionDay(visible, d);
               return (
                 <div key={d.toISOString()} className="week-allday-cell">
@@ -57,17 +70,23 @@ export function WeekView() {
         </div>
 
         <div className="time-grid">
-          <HourGutter />
+          <HourGutter startHour={viewStartHour} endHour={viewEndHour} />
           <div className="week-columns">
+            <NowLine
+              visibleStartHour={viewStartHour}
+              visibleEndHour={viewEndHour}
+              todayColumnIndex={todayColumnIndex}
+              columnCount={7}
+            />
             {days.map((d) => {
-              const split = partitionDay(visible, d);
+              const split = partitionDay(visible, d, viewStartHour, viewEndHour);
               const lanes = assignLanes(split.timed, d);
               return (
                 <div
                   key={d.toISOString()}
                   className={`day-column ${isSameDay(d, today) ? "today" : ""}`}
                 >
-                  <HourLines />
+                  <HourLines startHour={viewStartHour} endHour={viewEndHour} />
                   {split.timed.map((e) => {
                     const meta = lanes.get(e.id) ?? { lane: 0, total: 1 };
                     return (
@@ -77,6 +96,8 @@ export function WeekView() {
                         day={d}
                         lane={meta.lane}
                         laneCount={meta.total}
+                        visibleStartHour={viewStartHour}
+                        visibleEndHour={viewEndHour}
                       />
                     );
                   })}

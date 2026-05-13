@@ -120,3 +120,56 @@
 .create-btn:hover {
   filter: brightness(1.05);
 }
+
+.zoom-control {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  height: 28px;
+}
+
+.zoom-btn {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  width: 26px;
+  height: 100%;
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.zoom-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.zoom-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.zoom-value {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  padding: 0 6px;
+  height: 100%;
+  min-width: 44px;
+  text-align: center;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.zoom-value:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.zoom-value:disabled {
+  cursor: default;
+}

@@ -7,6 +7,7 @@ import type {
   UnifiedEvent,
 } from "../../types";
 import { DEFAULT_SOURCES } from "../../types";
+import { classifyError } from "../../lib/errors";
 import { useCalendarStore } from "../../store/calendarStore";
 import {
   formPartsToIso,
@@ -165,7 +166,10 @@ export function EventModal({
       }
       onClose();
     } catch (e) {
-      setError(String(e));
+      // Keep the modal open with the user's input intact (DESIGN.md エラーハンドリング
+      // 方針: イベント作成失敗 → 入力保持). The localized message replaces the raw
+      // backend dump for readability.
+      setError(classifyError(e).userMessage);
     } finally {
       setSubmitting(false);
     }

@@ -26,10 +26,13 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* `--hour-px` is set on `.time-grid-scroll` by the view component (default 60).
+   24 * --hour-px controls the full-day height so HourGutter / HourLines / EventBlock
+   absolute positioning all scale in lockstep. */
 .time-grid {
   display: flex;
-  min-height: 1440px;
-  height: 1440px;
+  min-height: calc(var(--hour-px, 60px) * 24);
+  height: calc(var(--hour-px, 60px) * 24);
 }
 
 .hour-gutter {
@@ -144,4 +147,30 @@
 .week-allday-cell .allday-bar {
   border-bottom: none;
   min-height: 24px;
+}
+
+/* Current-time indicator. The line sits above hour-lines (z 1) but below event blocks'
+   focus outlines; events themselves are drawn as transparent-tinted backgrounds with a
+   colored left border so a 1-2 px red line stays legible across them. */
+.now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #e53935;
+  z-index: 2;
+  pointer-events: none;
+  transform: translateY(-1px);
+}
+
+.now-dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #e53935;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px var(--surface);
 }

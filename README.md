@@ -18,11 +18,17 @@ A unified desktop calendar client that aggregates Microsoft 365, Google Workspac
 
 - Day / Week views aggregating up to three calendar sources with timezone-aware (JST) layout
 - Per-source and per-subcalendar visibility toggles, with hidden-calendar collapse and bulk on/off
+- Per-calendar display overrides — custom color and display name without round-tripping to the provider
+- Configurable visible time-of-day window (e.g. 7:00–21:00); out-of-window events are clipped automatically
+- Adjustable hour-row height (40–240 px / hour, 8 presets) with click-to-reset to the default 60 px
+- Current-time indicator — red horizontal line across the time grid, with a dot marking today's column in week view
 - Event create / edit / delete with two-step source × calendar selection
 - Recurring event support — preset RRULEs (daily / weekly / weekdays / monthly / yearly) at creation time, with edit / delete scopes ("this only" / "all")
 - OS-native credential storage via the `keyring` crate (Keychain on macOS, Credential Manager on Windows)
-- Automatic OAuth token refresh on 401 responses
-- Persisted UI settings (view mode, source/subcalendar visibility) via Tauri store plugin
+- Automatic OAuth token refresh on 401 responses; re-auth prompted on persistent failure
+- Structured error classification with localized messages (auth / network / permission / not-found / conflict / rate-limit / server)
+- Per-source/per-calendar fetch warnings surfaced as info toasts (one source's auth expiry doesn't block the rest)
+- Persisted UI settings (view mode, source/subcalendar visibility, hour height, visible time window, color & label overrides) via Tauri store plugin
 - Toast notifications for write operations
 - Windows (x86_64) & macOS (universal) desktop builds
 

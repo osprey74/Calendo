@@ -127,3 +127,23 @@ pub struct AuthStatus {
     #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<i64>,
 }
+
+/// Non-fatal problem encountered while aggregating events from multiple sources. The
+/// fetch as a whole still succeeds; the frontend surfaces these as a warning toast so
+/// the user knows why a particular source/calendar is missing from the view.
+#[derive(Debug, Clone, Serialize)]
+pub struct FetchWarning {
+    #[serde(rename = "sourceId")]
+    pub source_id: String,
+    #[serde(rename = "calendarId", skip_serializing_if = "Option::is_none")]
+    pub calendar_id: Option<String>,
+    /// Matches `AppError::kind()` so the frontend can reuse `classifyError` for messaging.
+    pub kind: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EventsFetchResult {
+    pub events: Vec<UnifiedEvent>,
+    pub warnings: Vec<FetchWarning>,
+}

@@ -78,3 +78,26 @@ export type EventUpdateRequest = {
   draft: EventDraft;
   recurringScope?: RecurringEditScope;
 };
+
+/** Per-calendar user overrides for display attributes (color, label).
+ *  Keyed by `${sourceId}|${calendarId}` in the persistence layer. */
+export type CalendarOverride = {
+  /** When set, replaces the provider-supplied color in UI rendering.
+   *  Must be a `#RRGGBB` hex string so existing `hexToBg()` helpers keep working. */
+  color?: string;
+  /** When set, replaces the provider-supplied calendar name. */
+  label?: string;
+};
+
+/** Non-fatal problem from a single source/calendar during `events_fetch`. */
+export type FetchWarning = {
+  sourceId: string;
+  calendarId?: string;
+  kind: string;
+  message: string;
+};
+
+export type EventsFetchResult = {
+  events: UnifiedEvent[];
+  warnings: FetchWarning[];
+};

@@ -7,7 +7,7 @@
  */
 
 import { Store, type Store as StoreInstance } from "@tauri-apps/plugin-store";
-import type { CalendarSourceId, CalendarView } from "../types";
+import type { CalendarOverride, CalendarSourceId, CalendarView } from "../types";
 
 const STORE_PATH = "settings.json";
 
@@ -23,6 +23,10 @@ export type PersistedSettings = {
   view?: CalendarView;
   sourceEnabled?: Partial<Record<CalendarSourceId, boolean>>;
   calendarEnabled?: Record<string, boolean>;
+  calendarOverrides?: Record<string, CalendarOverride>;
+  hourHeightPx?: number;
+  viewStartHour?: number;
+  viewEndHour?: number;
 };
 
 export async function loadSettings(): Promise<PersistedSettings> {
@@ -33,6 +37,11 @@ export async function loadSettings(): Promise<PersistedSettings> {
       sourceEnabled:
         (await s.get<Partial<Record<CalendarSourceId, boolean>>>("sourceEnabled")) ?? undefined,
       calendarEnabled: (await s.get<Record<string, boolean>>("calendarEnabled")) ?? undefined,
+      calendarOverrides:
+        (await s.get<Record<string, CalendarOverride>>("calendarOverrides")) ?? undefined,
+      hourHeightPx: (await s.get<number>("hourHeightPx")) ?? undefined,
+      viewStartHour: (await s.get<number>("viewStartHour")) ?? undefined,
+      viewEndHour: (await s.get<number>("viewEndHour")) ?? undefined,
     };
   } catch {
     // First launch or corrupted store — fall through to defaults.
@@ -57,5 +66,26 @@ export async function saveSourceEnabled(
 export async function saveCalendarEnabled(map: Record<string, boolean>): Promise<void> {
   const s = await getStore();
   await s.set("calendarEnabled", map);
+  await s.save();
+}
+
+export async function saveCalendarOverrides(
+  map: Record<string, CalendarOverride>,
+): Promise<void> {
+  const s = await getStore();
+  await s.set("calendarOverrides", map);
+  await s.save();
+}
+
+export async function saveHourHeightPx(px: number): Promise<void> {
+  const s = await getStore();
+  await s.set("hourHeightPx", px);
+  await s.save();
+}
+
+export async function saveViewHours(startHour: number, endHour: number): Promise<void> {
+  const s = await getStore();
+  await s.set("viewStartHour", startHour);
+  await s.set("viewEndHour", endHour);
   await s.save();
 }

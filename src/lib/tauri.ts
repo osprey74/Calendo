@@ -6,6 +6,7 @@ import type {
   ClientDebugInfo,
   EventDraft,
   EventUpdateRequest,
+  EventsFetchResult,
   UnifiedEvent,
 } from "../types";
 
@@ -34,7 +35,7 @@ export const eventsFetch = (
   dateFrom: string,
   dateTo: string,
 ) =>
-  invoke<UnifiedEvent[]>("events_fetch", {
+  invoke<EventsFetchResult>("events_fetch", {
     sourceIds,
     calendarIds: calendarIds ?? null,
     dateFrom,
